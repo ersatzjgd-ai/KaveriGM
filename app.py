@@ -8,8 +8,12 @@ import string
 st.set_page_config(page_title="Kaveri Guest Manager", layout="centered", initial_sidebar_state="collapsed")
 
 # Initialize Supabase Connection
-# (Relies on Streamlit Secrets for SUPABASE_URL and SUPABASE_KEY)
 conn = st.connection("supabase", type=SupabaseConnection)
+
+# --- STATE INITIALIZATION ---
+# This remembers if the manager is logged in so we don't ask for the password again
+if "manager_logged_in" not in st.session_state:
+    st.session_state.manager_logged_in = False
 
 # --- HELPER FUNCTIONS ---
 def generate_password(length=6):
@@ -19,7 +23,6 @@ def generate_password(length=6):
 
 # --- UI: ROLE SELECTOR ---
 st.title("🏛️ Kaveri Command")
-# A fast toggle switch at the top of the app
 role = st.segmented_control("Select Role", ["On-Ground Staff 🏃", "Manager 👔"], default="On-Ground Staff 🏃")
 st.divider()
 
@@ -28,68 +31,90 @@ st.divider()
 # ==========================================
 if role == "Manager 👔":
     
-    # --- 1. EXPECTED GUESTS CHECK-IN (TOP PRIORITY) ---
-    st.subheader("📥 Incoming Guests")
-    st.caption("Check-in expected guests, assign lounges, and generate access.")
-    
-    # Fetch guests who haven't left and aren't active yet (Expected guests)
-    res = conn.table("guests").select("*").eq("is_active", False).eq("has_left_kaveri", False).execute()
-    expected_guests = res.data
-
-    if not expected_guests:
-        st.info("No new expected guests at the moment.")
-    else:
-        for guest in expected_guests:
-            # Use an expander to keep the list clean and compact on mobile
-            with st.expander(f"👤 {guest['guest_name']} ({guest['session_type']})"):
-                
-                # Manager Actions
-                lounge_choice = st.selectbox("Assign Lounge", ["L1", "L2", "L3", "BR", "L5"], key=f"mgr_l_{guest['id']}")
-                
-                col1, col2 = st.columns([3, 1])
-                new_pass = col1.text_input("Access Password", value=generate_password(), key=f"mgr_p_{guest['id']}")
-                
-                if st.button("Mark as ACTIVE ✅", key=f"mgr_btn_{guest['id']}", type="primary", use_container_width=True):
-                    # Update DB to make them active for the ground staff
-                    conn.table("guests").update({
-                        "is_active": True,
-                        "lounge": lounge_choice,
-                        "access_password": new_pass
-                    }).eq("id", guest['id']).execute()
-                    
-                    st.toast(f"{guest['guest_name']} is now Active in {lounge_choice}!")
-                    st.rerun()
-
-    st.write("---") # Visual separator
-
-    # --- 2. ADD GUESTS FEATURE ---
-    with st.expander("➕ Add New Expected Guests", expanded=False):
-        st.caption("Type or paste guest names below. Put each name on a new line.")
+    # --- PASSWORD PROTECTION ---
+    if not st.session_state.manager_logged_in:
+        st.subheader("🔒 Manager Access")
+        pwd_input = st.text_input("Enter Admin Password", type="password")
         
-        with st.form("add_guests_form", clear_on_submit=True):
-            session_type = st.radio("Session", ["Morning", "Evening"], horizontal=True)
-            guest_names_input = st.text_area("Guest Names (One per line)")
+        # We use .get() here so the app doesn't crash if you forget to add the secret
+        correct_password = st.secrets.get("MANAGER_PASSWORD", "kaveri_admin") 
+        
+        if st.button("Login", type="primary"):
+            if pwd_input == correct_password:
+                st.session_state.manager_logged_in = True
+                st.rerun() # Refresh the page to show the manager UI
+            else:
+                st.error("Incorrect password.")
+                
+    # --- ACTUAL MANAGER DASHBOARD (Only visible if logged in) ---
+    else:
+        # A quick logout button at the top right
+        col_space, col_logout = st.columns([4, 1])
+        if col_logout.button("Logout"):
+            st.session_state.manager_logged_in = False
+            st.rerun()
             
-            submit_btn = st.form_submit_button("💾 Save to Database", type="primary", use_container_width=True)
-            
-            if submit_btn:
-                if guest_names_input.strip():
-                    # Split by line and remove empty spaces
-                    names_list = [name.strip() for name in guest_names_input.split('\n') if name.strip()]
+        # --- 1. EXPECTED GUESTS CHECK-IN ---
+        st.subheader("📥 Incoming Guests")
+        st.caption("Check-in expected guests, assign lounges, and generate access.")
+        
+        res = conn.table("guests").select("*").eq("is_active", False).eq("has_left_kaveri", False).execute()
+        expected_guests = res.data
+
+        if not expected_guests:
+            st.info("No new expected guests at the moment.")
+        else:
+            for guest in expected_guests:
+                with st.expander(f"👤 {guest['guest_name']} ({guest['session_type']})"):
+                    lounge_choice = st.selectbox("Assign Lounge", ["L1", "L2", "L3", "BR", "L5"], key=f"mgr_l_{guest['id']}")
+                    col1, col2 = st.columns([3, 1])
+                    new_pass = col1.text_input("Access Password", value=generate_password(), key=f"mgr_p_{guest['id']}")
                     
-                    # Prepare data for Supabase batch insert
-                    insert_data = [
-                        {"guest_name": name, "session_type": session_type} 
-                        for name in names_list
-                    ]
-                    
-                    # Execute Insert
-                    conn.table("guests").insert(insert_data).execute()
-                    
-                    st.success(f"Added {len(names_list)} guests to the {session_type} session!")
-                    st.rerun() # Refresh the page to show the new guests in the Incoming list
-                else:
-                    st.error("Please enter at least one guest name.")
+                    if st.button("Mark as ACTIVE ✅", key=f"mgr_btn_{guest['id']}", type="primary", use_container_width=True):
+                        conn.table("guests").update({
+                            "is_active": True,
+                            "lounge": lounge_choice,
+                            "access_password": new_pass
+                        }).eq("id", guest['id']).execute()
+                        st.toast(f"{guest['guest_name']} is now Active in {lounge_choice}!")
+                        st.rerun()
+
+        st.write("---") 
+
+        # --- 2. ADD GUESTS FEATURE ---
+        with st.expander("➕ Add New Expected Guests", expanded=False):
+            st.caption("Type or paste guest names below. Put each name on a new line.")
+            with st.form("add_guests_form", clear_on_submit=True):
+                session_type = st.radio("Session", ["Morning", "Evening"], horizontal=True)
+                guest_names_input = st.text_area("Guest Names (One per line)")
+                submit_btn = st.form_submit_button("💾 Save to Database", type="primary", use_container_width=True)
+                
+                if submit_btn:
+                    if guest_names_input.strip():
+                        names_list = [name.strip() for name in guest_names_input.split('\n') if name.strip()]
+                        insert_data = [{"guest_name": name, "session_type": session_type} for name in names_list]
+                        conn.table("guests").insert(insert_data).execute()
+                        st.success(f"Added {len(names_list)} guests!")
+                        st.rerun() 
+                    else:
+                        st.error("Please enter at least one guest name.")
+
+        st.write("---") 
+
+        # --- 3. CURRENTLY ACTIVE GUESTS (Read-Only View for Manager) ---
+        st.subheader("🟢 Currently Active Guests")
+        st.caption("Overview of guests currently inside the building.")
+        
+        res_active = conn.table("guests").select("*").eq("is_active", True).eq("has_left_kaveri", False).execute()
+        mgr_active_guests = res_active.data
+        
+        if not mgr_active_guests:
+            st.info("No guests are currently active inside the building.")
+        else:
+            for ag in mgr_active_guests:
+                # Displaying a clean, simple list so the manager can quickly scan who is where
+                st.markdown(f"**{ag['guest_name']}** | Lounge: **{ag['lounge']}** | WiFi: `{ag.get('access_password', 'N/A')}`")
+
 
 # ==========================================
 #           ON-GROUND STAFF UI
@@ -97,9 +122,59 @@ if role == "Manager 👔":
 elif role == "On-Ground Staff 🏃":
     st.subheader("📍 Active Guests")
     
-    # Fetch ONLY guests who are currently Active in the building
     res = conn.table("guests").select("*").eq("is_active", True).eq("has_left_kaveri", False).execute()
     active_guests = res.data
 
     if not active_guests:
-        st
+        st.success("No active guests currently in the building! Take a breather. ☕")
+    else:
+        guest_dict = {f"{g['guest_name']} - {g['lounge']}": g for g in active_guests}
+        
+        selected_guest_label = st.selectbox("Select Guest to Update:", options=list(guest_dict.keys()))
+        selected_guest = guest_dict[selected_guest_label]
+        g_id = selected_guest['id']
+
+        with st.container(border=True):
+            st.markdown(f"### {selected_guest['guest_name']}")
+            st.caption(f"**Lounge:** {selected_guest['lounge']} | **WiFi:** `{selected_guest.get('access_password', 'N/A')}`")
+            
+            c1, c2 = st.columns(2)
+            video = c1.toggle("📺 LMW Video", value=selected_guest.get('video_watched', False))
+            ip_demo = c2.toggle("💻 IP Demo", value=selected_guest.get('ip_demo_done', False))
+            
+            c3, c4 = st.columns(2)
+            gurudev = c3.toggle("🙏 Met Gurudev", value=selected_guest.get('met_gurudev', False))
+            gift = c4.toggle("🎁 Gift Given", value=selected_guest.get('gift_given', False))
+            
+            st.divider()
+            
+            left_building = st.toggle("🚪 Guest Left Kaveri (Checkout)", value=False)
+
+            if st.button("💾 Save Status & WhatsApp", type="primary", use_container_width=True):
+                conn.table("guests").update({
+                    "video_watched": video,
+                    "ip_demo_done": ip_demo,
+                    "met_gurudev": gurudev,
+                    "gift_given": gift,
+                    "has_left_kaveri": left_building,
+                    "is_active": not left_building 
+                }).eq("id", g_id).execute()
+
+                st.toast("Database Updated!")
+
+                status_emoji = "✅ Departed" if left_building else "📍 In Session"
+                msg = (
+                    f"*Status Update: {selected_guest['guest_name']}*\n"
+                    f"Lounge: {selected_guest['lounge']}\n"
+                    f"📺 Video: {'Yes' if video else 'No'}\n"
+                    f"💻 Demo: {'Yes' if ip_demo else 'No'}\n"
+                    f"🙏 Gurudev: {'Yes' if gurudev else 'No'}\n"
+                    f"🎁 Gift: {'Yes' if gift else 'No'}\n"
+                    f"Status: {status_emoji}"
+                )
+                wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
+                
+                st.link_button("📲 Share to WhatsApp", wa_url, use_container_width=True)
+                
+                if left_building:
+                    st.rerun()
