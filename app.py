@@ -68,7 +68,7 @@ if role == "Manager 👔":
 
         st.write("---") 
 
-        # --- 2. CURRENTLY ACTIVE GUESTS (Moved up) ---
+        # --- 2. CURRENTLY ACTIVE GUESTS ---
         st.subheader("🟢 Currently Active Guests")
         st.caption("Overview of guests currently inside the building.")
         
@@ -83,7 +83,7 @@ if role == "Manager 👔":
 
         st.write("---") 
 
-        # --- 3. ADD GUESTS FEATURE (Moved down) ---
+        # --- 3. ADD GUESTS FEATURE ---
         with st.expander("➕ Add New Expected Guests", expanded=False):
             st.caption("Type or paste guest names below. Put each name on a new line.")
             with st.form("add_guests_form", clear_on_submit=True):
@@ -148,15 +148,15 @@ elif role == "On-Ground Staff 🏃":
                 
                 left_building = st.toggle("🚪 Guest Left Kaveri (Checkout)", value=False, key=f"left_{guest['id']}")
 
-                # Prepare WhatsApp Message dynamically
-                status_emoji = "✅ Departed" if left_building else "📍 In Session"
+                # Prepare WhatsApp Message dynamically with updated emojis and wording
+                status_emoji = "✅ Departed" if left_building else "📍 Still at Kaveri"
                 msg = (
                     f"*Status Update: {guest['guest_name']}*\n"
                     f"Lounge: {new_lounge}\n"
-                    f"📺 Video: {'Yes' if video else 'No'}\n"
-                    f"💻 Demo: {'Yes' if ip_demo else 'No'}\n"
-                    f"🙏 Gurudev: {'Yes' if gurudev else 'No'}\n"
-                    f"🎁 Gift: {'Yes' if gift else 'No'}\n"
+                    f"📺 Video: {'✅' if video else '❌'}\n"
+                    f"💻 Demo: {'✅' if ip_demo else '❌'}\n"
+                    f"🙏 Gurudev: {'✅' if gurudev else '❌'}\n"
+                    f"🎁 Gift: {'✅' if gift else '❌'}\n"
                     f"Status: {status_emoji}"
                 )
                 wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
