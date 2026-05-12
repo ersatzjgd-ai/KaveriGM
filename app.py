@@ -1,8 +1,6 @@
 import streamlit as st
 from st_supabase_connection import SupabaseConnection
 import urllib.parse
-import random
-import string
 
 # --- CONFIG ---
 st.set_page_config(page_title="Kaveri Guest Manager", layout="centered", initial_sidebar_state="collapsed")
@@ -11,15 +9,9 @@ st.set_page_config(page_title="Kaveri Guest Manager", layout="centered", initial
 conn = st.connection("supabase", type=SupabaseConnection)
 
 # --- STATE INITIALIZATION ---
-# This remembers if the manager is logged in so we don't ask for the password again
+# This remembers if the manager is logged in
 if "manager_logged_in" not in st.session_state:
     st.session_state.manager_logged_in = False
-
-# --- HELPER FUNCTIONS ---
-def generate_password(length=6):
-    """Generates a quick, readable password for guests."""
-    chars = string.ascii_uppercase + string.digits
-    return ''.join(random.choice(chars) for _ in range(length))
 
 # --- UI: ROLE SELECTOR ---
 st.title("🏛️ Kaveri Command")
@@ -36,17 +28,16 @@ if role == "Manager 👔":
         st.subheader("🔒 Manager Access")
         pwd_input = st.text_input("Enter Admin Password", type="password")
         
-        # We use .get() here so the app doesn't crash if you forget to add the secret
         correct_password = st.secrets.get("MANAGER_PASSWORD", "kaveri_admin") 
         
         if st.button("Login", type="primary"):
             if pwd_input == correct_password:
                 st.session_state.manager_logged_in = True
-                st.rerun() # Refresh the page to show the manager UI
+                st.rerun() 
             else:
                 st.error("Incorrect password.")
                 
-    # --- ACTUAL MANAGER DASHBOARD (Only visible if logged in) ---
+    # --- ACTUAL MANAGER DASHBOARD ---
     else:
         # A quick logout button at the top right
         col_space, col_logout = st.columns([4, 1])
@@ -56,7 +47,7 @@ if role == "Manager 👔":
             
         # --- 1. EXPECTED GUESTS CHECK-IN ---
         st.subheader("📥 Incoming Guests")
-        st.caption("Check-in expected guests, assign lounges, and generate access.")
+        st.caption("Check-in expected guests and assign lounges.")
         
         res = conn.table("guests").select("*").eq("is_active", False).eq("has_left_kaveri", False).execute()
         expected_guests = res.data
@@ -66,15 +57,13 @@ if role == "Manager 👔":
         else:
             for guest in expected_guests:
                 with st.expander(f"👤 {guest['guest_name']} ({guest['session_type']})"):
+                    # Simplified to just the Lounge Dropdown
                     lounge_choice = st.selectbox("Assign Lounge", ["L1", "L2", "L3", "BR", "L5"], key=f"mgr_l_{guest['id']}")
-                    col1, col2 = st.columns([3, 1])
-                    new_pass = col1.text_input("Access Password", value=generate_password(), key=f"mgr_p_{guest['id']}")
                     
                     if st.button("Mark as ACTIVE ✅", key=f"mgr_btn_{guest['id']}", type="primary", use_container_width=True):
                         conn.table("guests").update({
                             "is_active": True,
-                            "lounge": lounge_choice,
-                            "access_password": new_pass
+                            "lounge": lounge_choice
                         }).eq("id", guest['id']).execute()
                         st.toast(f"{guest['guest_name']} is now Active in {lounge_choice}!")
                         st.rerun()
@@ -101,7 +90,7 @@ if role == "Manager 👔":
 
         st.write("---") 
 
-        # --- 3. CURRENTLY ACTIVE GUESTS (Read-Only View for Manager) ---
+        # --- 3. CURRENTLY ACTIVE GUESTS ---
         st.subheader("🟢 Currently Active Guests")
         st.caption("Overview of guests currently inside the building.")
         
@@ -112,8 +101,8 @@ if role == "Manager 👔":
             st.info("No guests are currently active inside the building.")
         else:
             for ag in mgr_active_guests:
-                # Displaying a clean, simple list so the manager can quickly scan who is where
-                st.markdown(f"**{ag['guest_name']}** | Lounge: **{ag['lounge']}** | WiFi: `{ag.get('access_password', 'N/A')}`")
+                # Removed the Wi-Fi password display here
+                st.markdown(f"**{ag['guest_name']}** | Lounge: **{ag['lounge']}**")
 
 
 # ==========================================
@@ -136,7 +125,8 @@ elif role == "On-Ground Staff 🏃":
 
         with st.container(border=True):
             st.markdown(f"### {selected_guest['guest_name']}")
-            st.caption(f"**Lounge:** {selected_guest['lounge']} | **WiFi:** `{selected_guest.get('access_password', 'N/A')}`")
+            # Removed the Wi-Fi password display here as well
+            st.caption(f"**Lounge:** {selected_guest['lounge']}")
             
             c1, c2 = st.columns(2)
             video = c1.toggle("📺 LMW Video", value=selected_guest.get('video_watched', False))
