@@ -141,8 +141,17 @@ elif role == "On-Ground Staff 🏃":
                 ip_demo = c2.toggle("💻 IP Demo", value=guest.get('ip_demo_done', False), key=f"ip_{guest['id']}")
                 
                 c3, c4 = st.columns(2)
-                gurudev = c3.toggle("🙏 Met Gurudev", value=guest.get('met_gurudev', False), key=f"guru_{guest['id']}")
-                gift = c4.toggle("🎁 Gift Given", value=guest.get('gift_given', False), key=f"gift_{guest['id']}")
+                # If they already met Gurudev in the DB, they are inherently "Ready". Otherwise fetch standard ready status.
+                initial_ready_status = True if guest.get('met_gurudev', False) else guest.get('ready_to_meet_gurudev', False)
+                ready_gurudev = c3.toggle("⏳ Ready for Gurudev", value=initial_ready_status, key=f"ready_{guest['id']}")
+                gurudev = c4.toggle("🙏 Met Gurudev", value=guest.get('met_gurudev', False), key=f"guru_{guest['id']}")
+                
+                # Overriding the 'Ready' value if 'Met Gurudev' is flipped to True in this current session
+                if gurudev:
+                    ready_gurudev = True
+                
+                c5, c6 = st.columns(2)
+                gift = c5.toggle("🎁 Gift Given", value=guest.get('gift_given', False), key=f"gift_{guest['id']}")
                 
                 st.divider()
                 
@@ -155,7 +164,8 @@ elif role == "On-Ground Staff 🏃":
                     f"Lounge: {new_lounge}\n"
                     f"📺 Video: {'✅' if video else '❌'}\n"
                     f"💻 Demo: {'✅' if ip_demo else '❌'}\n"
-                    f"🙏 Gurudev: {'✅' if gurudev else '❌'}\n"
+                    f"⏳ Ready for Gurudev: {'✅' if ready_gurudev else '❌'}\n"
+                    f"🙏 Met Gurudev: {'✅' if gurudev else '❌'}\n"
                     f"🎁 Gift: {'✅' if gift else '❌'}\n"
                     f"Status: {status_emoji}"
                 )
@@ -169,6 +179,7 @@ elif role == "On-Ground Staff 🏃":
                         "lounge": new_lounge,
                         "video_watched": video,
                         "ip_demo_done": ip_demo,
+                        "ready_to_meet_gurudev": ready_gurudev,
                         "met_gurudev": gurudev,
                         "gift_given": gift,
                         "has_left_kaveri": left_building,
