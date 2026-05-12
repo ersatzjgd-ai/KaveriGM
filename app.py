@@ -39,7 +39,6 @@ if role == "Manager 👔":
                 
     # --- ACTUAL MANAGER DASHBOARD ---
     else:
-        # A quick logout button at the top right
         col_space, col_logout = st.columns([4, 1])
         if col_logout.button("Logout"):
             st.session_state.manager_logged_in = False
@@ -57,7 +56,6 @@ if role == "Manager 👔":
         else:
             for guest in expected_guests:
                 with st.expander(f"👤 {guest['guest_name']} ({guest['session_type']})"):
-                    # Simplified to just the Lounge Dropdown
                     lounge_choice = st.selectbox("Assign Lounge", ["L1", "L2", "L3", "BR", "L5"], key=f"mgr_l_{guest['id']}")
                     
                     if st.button("Mark as ACTIVE ✅", key=f"mgr_btn_{guest['id']}", type="primary", use_container_width=True):
@@ -101,7 +99,6 @@ if role == "Manager 👔":
             st.info("No guests are currently active inside the building.")
         else:
             for ag in mgr_active_guests:
-                # Removed the Wi-Fi password display here
                 st.markdown(f"**{ag['guest_name']}** | Lounge: **{ag['lounge']}**")
 
 
@@ -117,45 +114,45 @@ elif role == "On-Ground Staff 🏃":
     if not active_guests:
         st.success("No active guests currently in the building! Take a breather. ☕")
     else:
-        guest_dict = {f"{g['guest_name']} - {g['lounge']}": g for g in active_guests}
-        
-        selected_guest_label = st.selectbox("Select Guest to Update:", options=list(guest_dict.keys()))
-        selected_guest = guest_dict[selected_guest_label]
-        g_id = selected_guest['id']
+        # Loop through every active guest and create a card for them
+        for guest in active_guests:
+            with st.container(border=True):
+                
+                # Title and Bold Lounge ID
+                st.markdown(f"### 👤 {guest['guest_name']}")
+                st.markdown(f"📍 Current Lounge: **{guest['lounge']}**")
+                
+                # Lounge Re-Assignment Dropdown
+                lounge_options = ["L1", "L2", "L3", "BR", "L5"]
+                current_lounge = guest.get('lounge', 'L1')
+                if current_lounge not in lounge_options:
+                    lounge_options.insert(0, current_lounge)
+                    
+                new_lounge = st.selectbox(
+                    "Change Lounge?", 
+                    options=lounge_options, 
+                    index=lounge_options.index(current_lounge), 
+                    key=f"staff_l_{guest['id']}"
+                )
+                
+                # Toggles (With unique keys mapped to their database ID)
+                c1, c2 = st.columns(2)
+                video = c1.toggle("📺 LMW Video", value=guest.get('video_watched', False), key=f"vid_{guest['id']}")
+                ip_demo = c2.toggle("💻 IP Demo", value=guest.get('ip_demo_done', False), key=f"ip_{guest['id']}")
+                
+                c3, c4 = st.columns(2)
+                gurudev = c3.toggle("🙏 Met Gurudev", value=guest.get('met_gurudev', False), key=f"guru_{guest['id']}")
+                gift = c4.toggle("🎁 Gift Given", value=guest.get('gift_given', False), key=f"gift_{guest['id']}")
+                
+                st.divider()
+                
+                left_building = st.toggle("🚪 Guest Left Kaveri (Checkout)", value=False, key=f"left_{guest['id']}")
 
-        with st.container(border=True):
-            st.markdown(f"### {selected_guest['guest_name']}")
-            # Removed the Wi-Fi password display here as well
-            st.caption(f"**Lounge:** {selected_guest['lounge']}")
-            
-            c1, c2 = st.columns(2)
-            video = c1.toggle("📺 LMW Video", value=selected_guest.get('video_watched', False))
-            ip_demo = c2.toggle("💻 IP Demo", value=selected_guest.get('ip_demo_done', False))
-            
-            c3, c4 = st.columns(2)
-            gurudev = c3.toggle("🙏 Met Gurudev", value=selected_guest.get('met_gurudev', False))
-            gift = c4.toggle("🎁 Gift Given", value=selected_guest.get('gift_given', False))
-            
-            st.divider()
-            
-            left_building = st.toggle("🚪 Guest Left Kaveri (Checkout)", value=False)
-
-            if st.button("💾 Save Status & WhatsApp", type="primary", use_container_width=True):
-                conn.table("guests").update({
-                    "video_watched": video,
-                    "ip_demo_done": ip_demo,
-                    "met_gurudev": gurudev,
-                    "gift_given": gift,
-                    "has_left_kaveri": left_building,
-                    "is_active": not left_building 
-                }).eq("id", g_id).execute()
-
-                st.toast("Database Updated!")
-
+                # Prepare WhatsApp Message dynamically
                 status_emoji = "✅ Departed" if left_building else "📍 In Session"
                 msg = (
-                    f"*Status Update: {selected_guest['guest_name']}*\n"
-                    f"Lounge: {selected_guest['lounge']}\n"
+                    f"*Status Update: {guest['guest_name']}*\n"
+                    f"Lounge: {new_lounge}\n"
                     f"📺 Video: {'Yes' if video else 'No'}\n"
                     f"💻 Demo: {'Yes' if ip_demo else 'No'}\n"
                     f"🙏 Gurudev: {'Yes' if gurudev else 'No'}\n"
@@ -163,8 +160,22 @@ elif role == "On-Ground Staff 🏃":
                     f"Status: {status_emoji}"
                 )
                 wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
+
+                # Side-by-Side Action Buttons for Mobile speed
+                btn_col1, btn_col2 = st.columns(2)
                 
-                st.link_button("📲 Share to WhatsApp", wa_url, use_container_width=True)
-                
-                if left_building:
-                    st.rerun()
+                if btn_col1.button("💾 Save Status", type="primary", use_container_width=True, key=f"save_{guest['id']}"):
+                    conn.table("guests").update({
+                        "lounge": new_lounge,
+                        "video_watched": video,
+                        "ip_demo_done": ip_demo,
+                        "met_gurudev": gurudev,
+                        "gift_given": gift,
+                        "has_left_kaveri": left_building,
+                        "is_active": not left_building 
+                    }).eq("id", guest['id']).execute()
+
+                    st.toast(f"Updated {guest['guest_name']}!")
+                    st.rerun() 
+
+                btn_col2.link_button("📲 WhatsApp", wa_url, use_container_width=True)
