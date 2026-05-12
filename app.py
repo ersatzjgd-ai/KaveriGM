@@ -17,7 +17,7 @@ session_choice = st.radio("Current Session", ["Morning", "Evening"], horizontal=
 
 # 2. Fetch Guests for the selected session
 # Assuming you have a column 'session' and 'has_left' in your table
-response = conn.table("guests").select("*").eq("session", session_choice).execute()
+response = conn.table("guests").select("*").eq("session_type", session_choice).execute()
 guests = response.data
 
 if not guests:
