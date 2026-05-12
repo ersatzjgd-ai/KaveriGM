@@ -68,7 +68,22 @@ if role == "Manager 👔":
 
         st.write("---") 
 
-        # --- 2. ADD GUESTS FEATURE ---
+        # --- 2. CURRENTLY ACTIVE GUESTS (Moved up) ---
+        st.subheader("🟢 Currently Active Guests")
+        st.caption("Overview of guests currently inside the building.")
+        
+        res_active = conn.table("guests").select("*").eq("is_active", True).eq("has_left_kaveri", False).execute()
+        mgr_active_guests = res_active.data
+        
+        if not mgr_active_guests:
+            st.info("No guests are currently active inside the building.")
+        else:
+            for ag in mgr_active_guests:
+                st.markdown(f"**{ag['guest_name']}** | Lounge: **{ag['lounge']}**")
+
+        st.write("---") 
+
+        # --- 3. ADD GUESTS FEATURE (Moved down) ---
         with st.expander("➕ Add New Expected Guests", expanded=False):
             st.caption("Type or paste guest names below. Put each name on a new line.")
             with st.form("add_guests_form", clear_on_submit=True):
@@ -85,21 +100,6 @@ if role == "Manager 👔":
                         st.rerun() 
                     else:
                         st.error("Please enter at least one guest name.")
-
-        st.write("---") 
-
-        # --- 3. CURRENTLY ACTIVE GUESTS ---
-        st.subheader("🟢 Currently Active Guests")
-        st.caption("Overview of guests currently inside the building.")
-        
-        res_active = conn.table("guests").select("*").eq("is_active", True).eq("has_left_kaveri", False).execute()
-        mgr_active_guests = res_active.data
-        
-        if not mgr_active_guests:
-            st.info("No guests are currently active inside the building.")
-        else:
-            for ag in mgr_active_guests:
-                st.markdown(f"**{ag['guest_name']}** | Lounge: **{ag['lounge']}**")
 
 
 # ==========================================
