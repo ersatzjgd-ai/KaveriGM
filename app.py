@@ -20,7 +20,7 @@ if "manager_logged_in" not in st.session_state:
         st.session_state.manager_logged_in = False
 
 # --- UI: ROLE SELECTOR ---
-st.title("🏛️ Kaveri Command")
+st.title("🏛️ Kaveri GM")
 role = st.segmented_control("Select Role", ["On-Ground Team 🏃", "Manager 👔"], default="On-Ground Team 🏃")
 st.divider()
 
