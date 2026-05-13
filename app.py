@@ -14,15 +14,13 @@ today_start = f"{datetime.now().strftime('%Y-%m-%d')}T00:00:00"
 
 # --- PERSISTENT LOGIN (SURVIVES PAGE REFRESH) ---
 if "manager_logged_in" not in st.session_state:
-    # Check if the URL has our secret login token
     if st.query_params.get("logged_in") == "true":
         st.session_state.manager_logged_in = True
     else:
         st.session_state.manager_logged_in = False
 
 # --- UI: ROLE SELECTOR ---
-st.title("🏛️ Kaveri GM")
-# Changed "Staff" to "Team"
+st.title("🏛️ Kaveri Command")
 role = st.segmented_control("Select Role", ["On-Ground Team 🏃", "Manager 👔"], default="On-Ground Team 🏃")
 st.divider()
 
@@ -39,7 +37,6 @@ if role == "Manager 👔":
         if st.button("Login", type="primary"):
             if pwd_input == correct_password:
                 st.session_state.manager_logged_in = True
-                # Set URL param so they survive page refreshes!
                 st.query_params["logged_in"] = "true"
                 st.rerun() 
             else:
@@ -49,12 +46,11 @@ if role == "Manager 👔":
         col_space, col_logout = st.columns([4, 1])
         if col_logout.button("Logout"):
             st.session_state.manager_logged_in = False
-            # Remove URL param
             if "logged_in" in st.query_params:
                 del st.query_params["logged_in"]
             st.rerun()
             
-        # --- 1. EXPECTED GUESTS CHECK-IN ---
+        # --- 1. ULTRA-COMPACT EXPECTED GUESTS CHECK-IN ---
         st.subheader("📥 Incoming Guests")
         st.caption("Tap a lounge button to instantly check a guest in.")
         
@@ -65,16 +61,15 @@ if role == "Manager 👔":
             st.info("No new expected guests at the moment.")
         else:
             for guest in expected_guests:
-                with st.expander(f"👤 {guest['guest_name']} ({guest['session_type']})"):
-                    st.write("Assign Lounge:")
+                # Removed the expander to make it ultra-compact and fast
+                with st.container(border=True):
+                    st.markdown(f"**👤 {guest['guest_name']}** ({guest['session_type']})")
                     
-                    # High-Speed Manager Buttons (replaces dropdown)
                     btn_cols = st.columns(5)
                     lounges = ["L1", "L2", "L3", "BR", "L5"]
                     
                     for i, l_name in enumerate(lounges):
                         if btn_cols[i].button(l_name, key=f"mgr_{l_name}_{guest['id']}", use_container_width=True):
-                            # Instantly update and make active in one tap
                             conn.table("guests").update({
                                 "is_active": True,
                                 "lounge": l_name
@@ -86,9 +81,6 @@ if role == "Manager 👔":
 
         # --- 2. CURRENTLY ACTIVE GUESTS ---
         st.subheader("🟢 Currently Active Guests")
-        st.caption("Overview of guests currently inside the building.")
-        
-        # Only fetch people who haven't met Gurudev yet for the active queue
         res_active = conn.table("guests").select("*").eq("is_active", True).eq("met_gurudev", False).gte("created_at", today_start).execute()
         mgr_active_guests = res_active.data
         
@@ -125,87 +117,93 @@ elif role == "On-Ground Team 🏃":
     st.subheader("📍 Active Guests")
 
     # --- REALTIME AUTO-REFRESH ENGINE ---
-    # This magically refreshes the data inside this function every 10s without making the screen flicker
     @st.fragment(run_every="10s")
     def team_dashboard():
-        # Only fetch active guests who have NOT met Gurudev yet
         res = conn.table("guests").select("*").eq("is_active", True).eq("met_gurudev", False).gte("created_at", today_start).execute()
         active_guests = res.data
 
         if not active_guests:
             st.success("No active guests currently waiting. Take a breather! ☕")
             return
-
-        # Create a dictionary to power the search box
-        guest_dict = {g['guest_name']: g for g in active_guests}
-        
-        # Search Box with Auto-complete
-        selected_name = st.selectbox(
-            "🔍 Search / Select a Guest:", 
-            options=list(guest_dict.keys()), 
-            index=None, 
-            placeholder="Type a name to begin..."
-        )
-
-        # Only display the card if a guest is selected
-        if selected_name:
-            guest = guest_dict[selected_name]
             
+        # --- THE FILTER BAR ---
+        search_query = st.text_input("🔍 Search Guest Name...", "", placeholder="Type a name to filter the list below...")
+        
+        # Filter the list based on search (shows all if search is empty)
+        filtered_guests = [g for g in active_guests if search_query.lower() in g['guest_name'].lower()]
+
+        if not filtered_guests:
+            st.info("No guests match that name.")
+
+        for guest in filtered_guests:
+            current_lounge = guest.get('lounge', 'L1')
+            
+            # --- CMYK COLOR CODING MAPPING ---
+            color_map = {
+                "L1": ("#00FFFF", "#000000"), # Cyan (Black text)
+                "L2": ("#FFFF00", "#000000"), # Yellow (Black text)
+                "L3": ("#FF00FF", "#FFFFFF"), # Magenta (White text)
+                "L5": ("#000000", "#FFFFFF"), # Black (White text)
+                "BR": ("#E0E0E0", "#000000")  # Default Gray
+            }
+            bg_color, text_color = color_map.get(current_lounge, ("#E0E0E0", "#000000"))
+
             with st.container(border=True):
-                st.markdown(f"### 👤 {guest['guest_name']}")
+                # HTML injection for the colored banner
+                st.markdown(
+                    f'<div style="background-color: {bg_color}; color: {text_color}; padding: 8px; border-radius: 5px; text-align: center; font-weight: bold; margin-bottom: 10px; font-size: 18px;">'
+                    f'👤 {guest["guest_name"]} &nbsp;|&nbsp; {current_lounge}</div>', 
+                    unsafe_allow_html=True
+                )
                 
                 # --- AUTO-SAVING LOUNGE CHANGE ---
                 lounge_options = ["L1", "L2", "L3", "BR", "L5"]
-                current_lounge = guest.get('lounge', 'L1')
                 if current_lounge not in lounge_options:
                     lounge_options.insert(0, current_lounge)
                     
-                new_lounge = st.selectbox("Current Lounge:", options=lounge_options, index=lounge_options.index(current_lounge), key=f"staff_l_{guest['id']}")
+                new_lounge = st.selectbox("Update Lounge:", options=lounge_options, index=lounge_options.index(current_lounge), key=f"staff_l_{guest['id']}", label_visibility="collapsed")
                 if new_lounge != current_lounge:
                     conn.table("guests").update({"lounge": new_lounge}).eq("id", guest['id']).execute()
                     st.rerun()
 
-                st.divider()
-
-                # --- AUTO-SAVING TOGGLES ---
-                # Video
+                # --- ULTRA-COMPACT 2x2 TOGGLE GRID ---
+                c1, c2 = st.columns(2)
+                
+                # Video (Row 1, Col 1)
                 vid_val = guest.get('video_watched', False)
-                new_vid = st.toggle("📺 LMW Video", value=vid_val, key=f"vid_{guest['id']}")
+                new_vid = c1.toggle("📺 Video", value=vid_val, key=f"vid_{guest['id']}")
                 if new_vid != vid_val:
                     conn.table("guests").update({"video_watched": new_vid}).eq("id", guest['id']).execute()
                     st.rerun()
 
-                # Demo
+                # Demo (Row 1, Col 2)
                 demo_val = guest.get('ip_demo_done', False)
-                new_demo = st.toggle("💻 IP Demo", value=demo_val, key=f"ip_{guest['id']}")
+                new_demo = c2.toggle("💻 Demo", value=demo_val, key=f"ip_{guest['id']}")
                 if new_demo != demo_val:
                     conn.table("guests").update({"ip_demo_done": new_demo}).eq("id", guest['id']).execute()
                     st.rerun()
 
-                # Ready for Gurudev
+                # Ready for Gurudev (Row 2, Col 1)
                 ready_val = True if guest.get('met_gurudev', False) else guest.get('ready_to_meet_gurudev', False)
-                new_ready = st.toggle("⏳ Ready for Gurudev", value=ready_val, key=f"ready_{guest['id']}")
+                new_ready = c1.toggle("⏳ Ready", value=ready_val, key=f"ready_{guest['id']}")
                 if new_ready != ready_val:
                     conn.table("guests").update({"ready_to_meet_gurudev": new_ready}).eq("id", guest['id']).execute()
                     st.rerun()
 
-                # Met Gurudev (Triggers disappearance)
+                # Met Gurudev (Row 2, Col 2 - Triggers disappearance)
                 guru_val = guest.get('met_gurudev', False)
-                new_guru = st.toggle("🙏 Met Gurudev", value=guru_val, key=f"guru_{guest['id']}")
+                new_guru = c2.toggle("🙏 Met Gurudev", value=guru_val, key=f"guru_{guest['id']}")
                 if new_guru != guru_val:
                     update_data = {"met_gurudev": new_guru}
                     if new_guru:
-                        update_data["ready_to_meet_gurudev"] = True # Auto-set ready if met
+                        update_data["ready_to_meet_gurudev"] = True 
                     
                     conn.table("guests").update(update_data).eq("id", guest['id']).execute()
                     if new_guru:
-                        st.toast("Guest met Gurudev! Removing from list...")
+                        st.toast(f"{guest['guest_name']} met Gurudev! Removing from list...")
                     st.rerun()
                 
-                st.write("") # Spacer
-
                 # --- WHATSAPP MESSAGE ---
-                # Formatted exactly as requested
                 msg = (
                     f"*{new_lounge}*\n"
                     f"{guest['guest_name']}\n"
@@ -217,5 +215,5 @@ elif role == "On-Ground Team 🏃":
                 wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
                 st.link_button("📲 Send WhatsApp Update", wa_url, use_container_width=True)
 
-    # Call the fragment function so it renders on the screen
+    # Render the auto-refreshing UI
     team_dashboard()
