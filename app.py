@@ -1,3 +1,4 @@
+
 import streamlit as st
 from st_supabase_connection import SupabaseConnection
 import urllib.parse
@@ -179,7 +180,7 @@ elif role == "On-Ground Team 🏃":
                     st.rerun()
 
                 # --- HORIZONTAL MULTI-SELECT PILLS (Replaces vertical toggles) ---
-                options = ["📺 Video", "💻 Demo", "⏳ Ready", "🙏 Gurudev"]
+                options = ["📺 LMW", "💻 IP Demo", "⏳ GMR Ready", "🙏 Jai Gurudev"]
                 
                 # Fetch default states
                 vid_val = guest.get('video_watched', False)
@@ -188,10 +189,10 @@ elif role == "On-Ground Team 🏃":
                 ready_val = True if guru_val else guest.get('ready_to_meet_gurudev', False)
                 
                 defaults = []
-                if vid_val: defaults.append("📺 Video")
-                if demo_val: defaults.append("💻 Demo")
-                if ready_val: defaults.append("⏳ Ready")
-                if guru_val: defaults.append("🙏 Gurudev")
+                if vid_val: defaults.append("📺 LMW")
+                if demo_val: defaults.append("💻 IP Demo")
+                if ready_val: defaults.append("⏳ GMR Ready")
+                if guru_val: defaults.append("🙏 Jai Gurudev")
 
                 selected_statuses = st.pills(
                     "Status Toggles", 
