@@ -1,4 +1,3 @@
-
 import streamlit as st
 from st_supabase_connection import SupabaseConnection
 import urllib.parse
@@ -203,11 +202,11 @@ elif role == "On-Ground Team 🏃":
                     label_visibility="collapsed"
                 )
 
-                # Determine what was clicked
-                new_vid = "📺 Video" in selected_statuses
-                new_demo = "💻 Demo" in selected_statuses
-                new_ready = "⏳ Ready" in selected_statuses
-                new_guru = "🙏 Gurudev" in selected_statuses
+                # BUG FIX: Ensure these perfectly match the strings inside the 'options' list!
+                new_vid = "📺 LMW" in selected_statuses
+                new_demo = "💻 IP Demo" in selected_statuses
+                new_ready = "⏳ GMR Ready" in selected_statuses
+                new_guru = "🙏 Jai Gurudev" in selected_statuses
 
                 # Auto-save changes
                 if new_vid != vid_val or new_demo != demo_val or new_ready != ready_val or new_guru != guru_val:
@@ -231,10 +230,10 @@ elif role == "On-Ground Team 🏃":
                 msg = (
                     f"*{new_lounge}*\n"
                     f"{guest['guest_name']}\n"
-                    f"📺 Video: {'✅' if new_vid else '❌'}\n"
-                    f"💻 Demo: {'✅' if new_demo else '❌'}\n"
-                    f"⏳ Ready for Gurudev: {'✅' if new_ready else '❌'}\n"
-                    f"🙏 Met Gurudev: {'✅' if new_guru else '❌'}"
+                    f"📺 LMW: {'✅' if new_vid else '❌'}\n"
+                    f"💻 IP Demo: {'✅' if new_demo else '❌'}\n"
+                    f"⏳ GMR Ready: {'✅' if new_ready else '❌'}\n"
+                    f"🙏 Jai Gurudev: {'✅' if new_guru else '❌'}"
                 )
                 wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
                 st.link_button("📲 Send WhatsApp Update", wa_url, use_container_width=True)
