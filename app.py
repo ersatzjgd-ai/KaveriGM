@@ -50,32 +50,37 @@ if role == "Manager 👔":
                 del st.query_params["logged_in"]
             st.rerun()
             
-        # --- 1. ULTRA-COMPACT EXPECTED GUESTS CHECK-IN ---
+        # --- 1. EXPECTED GUESTS CHECK-IN (WITH SEARCH & HORIZONTAL BUTTONS) ---
         st.subheader("📥 Incoming Guests")
-        st.caption("Tap a lounge button to instantly check a guest in.")
+        st.caption("Tap a lounge pill to instantly check a guest in.")
         
         res = conn.table("guests").select("*").eq("is_active", False).eq("has_left_kaveri", False).gte("created_at", today_start).execute()
         expected_guests = res.data
 
-        if not expected_guests:
-            st.info("No new expected guests at the moment.")
+        # Manager Search Bar
+        search_incoming = st.text_input("🔍 Search Expected Guest...", "", placeholder="Type a name to filter...")
+        filtered_expected = [g for g in expected_guests if search_incoming.lower() in g['guest_name'].lower()]
+
+        if not filtered_expected:
+            if search_incoming:
+                st.info("No expected guests match that name.")
+            else:
+                st.success("No new expected guests at the moment.")
         else:
-            for guest in expected_guests:
-                # Removed the expander to make it ultra-compact and fast
+            for guest in filtered_expected:
                 with st.container(border=True):
                     st.markdown(f"**👤 {guest['guest_name']}** ({guest['session_type']})")
                     
-                    btn_cols = st.columns(5)
-                    lounges = ["L1", "L2", "L3", "BR", "L5"]
+                    # Horizontal, ultra-compact "Pills" replacing the bulky stacked buttons
+                    selected_lounge = st.pills("Assign Lounge", ["L1", "L2", "L3", "BR", "L5"], key=f"mgr_l_{guest['id']}", label_visibility="collapsed")
                     
-                    for i, l_name in enumerate(lounges):
-                        if btn_cols[i].button(l_name, key=f"mgr_{l_name}_{guest['id']}", use_container_width=True):
-                            conn.table("guests").update({
-                                "is_active": True,
-                                "lounge": l_name
-                            }).eq("id", guest['id']).execute()
-                            st.toast(f"{guest['guest_name']} sent to {l_name}!")
-                            st.rerun()
+                    if selected_lounge:
+                        conn.table("guests").update({
+                            "is_active": True,
+                            "lounge": selected_lounge
+                        }).eq("id", guest['id']).execute()
+                        st.toast(f"{guest['guest_name']} sent to {selected_lounge}!")
+                        st.rerun()
 
         st.write("---") 
 
@@ -129,7 +134,6 @@ elif role == "On-Ground Team 🏃":
         # --- THE FILTER BAR ---
         search_query = st.text_input("🔍 Search Guest Name...", "", placeholder="Type a name to filter the list below...")
         
-        # Filter the list based on search (shows all if search is empty)
         filtered_guests = [g for g in active_guests if search_query.lower() in g['guest_name'].lower()]
 
         if not filtered_guests:
@@ -166,44 +170,55 @@ elif role == "On-Ground Team 🏃":
                     conn.table("guests").update({"lounge": new_lounge}).eq("id", guest['id']).execute()
                     st.rerun()
 
-                # --- ULTRA-COMPACT 2x2 TOGGLE GRID ---
-                c1, c2 = st.columns(2)
+                # --- HORIZONTAL MULTI-SELECT PILLS (Replaces vertical toggles) ---
+                options = ["📺 Video", "💻 Demo", "⏳ Ready", "🙏 Gurudev"]
                 
-                # Video (Row 1, Col 1)
+                # Fetch default states
                 vid_val = guest.get('video_watched', False)
-                new_vid = c1.toggle("📺 Video", value=vid_val, key=f"vid_{guest['id']}")
-                if new_vid != vid_val:
-                    conn.table("guests").update({"video_watched": new_vid}).eq("id", guest['id']).execute()
-                    st.rerun()
-
-                # Demo (Row 1, Col 2)
                 demo_val = guest.get('ip_demo_done', False)
-                new_demo = c2.toggle("💻 Demo", value=demo_val, key=f"ip_{guest['id']}")
-                if new_demo != demo_val:
-                    conn.table("guests").update({"ip_demo_done": new_demo}).eq("id", guest['id']).execute()
-                    st.rerun()
-
-                # Ready for Gurudev (Row 2, Col 1)
-                ready_val = True if guest.get('met_gurudev', False) else guest.get('ready_to_meet_gurudev', False)
-                new_ready = c1.toggle("⏳ Ready", value=ready_val, key=f"ready_{guest['id']}")
-                if new_ready != ready_val:
-                    conn.table("guests").update({"ready_to_meet_gurudev": new_ready}).eq("id", guest['id']).execute()
-                    st.rerun()
-
-                # Met Gurudev (Row 2, Col 2 - Triggers disappearance)
                 guru_val = guest.get('met_gurudev', False)
-                new_guru = c2.toggle("🙏 Met Gurudev", value=guru_val, key=f"guru_{guest['id']}")
-                if new_guru != guru_val:
-                    update_data = {"met_gurudev": new_guru}
-                    if new_guru:
-                        update_data["ready_to_meet_gurudev"] = True 
+                ready_val = True if guru_val else guest.get('ready_to_meet_gurudev', False)
+                
+                defaults = []
+                if vid_val: defaults.append("📺 Video")
+                if demo_val: defaults.append("💻 Demo")
+                if ready_val: defaults.append("⏳ Ready")
+                if guru_val: defaults.append("🙏 Gurudev")
+
+                selected_statuses = st.pills(
+                    "Status Toggles", 
+                    options, 
+                    default=defaults, 
+                    selection_mode="multi", 
+                    key=f"pills_{guest['id']}", 
+                    label_visibility="collapsed"
+                )
+
+                # Determine what was clicked
+                new_vid = "📺 Video" in selected_statuses
+                new_demo = "💻 Demo" in selected_statuses
+                new_ready = "⏳ Ready" in selected_statuses
+                new_guru = "🙏 Gurudev" in selected_statuses
+
+                # Auto-save changes
+                if new_vid != vid_val or new_demo != demo_val or new_ready != ready_val or new_guru != guru_val:
+                    update_data = {}
+                    if new_vid != vid_val: update_data["video_watched"] = new_vid
+                    if new_demo != demo_val: update_data["ip_demo_done"] = new_demo
+                    if new_ready != ready_val: update_data["ready_to_meet_gurudev"] = new_ready
                     
+                    if new_guru != guru_val:
+                        update_data["met_gurudev"] = new_guru
+                        if new_guru:
+                            update_data["ready_to_meet_gurudev"] = True
+                            new_ready = True # Force ready for WhatsApp msg
+                            
                     conn.table("guests").update(update_data).eq("id", guest['id']).execute()
                     if new_guru:
                         st.toast(f"{guest['guest_name']} met Gurudev! Removing from list...")
                     st.rerun()
                 
-                # --- WHATSAPP MESSAGE ---
+                # --- WHATSAPP MESSAGE (Formatted exactly as requested) ---
                 msg = (
                     f"*{new_lounge}*\n"
                     f"{guest['guest_name']}\n"
