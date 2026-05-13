@@ -84,8 +84,8 @@ if role == "Manager 👔":
 
         st.write("---") 
 
-        # --- 2. CURRENTLY ACTIVE GUESTS ---
-        st.subheader("🟢 Currently Active Guests")
+        # --- 2. ARRIVED GUESTS (WITH UNDO BUTTON) ---
+        st.subheader("🟢 Arrived Guests")
         res_active = conn.table("guests").select("*").eq("is_active", True).eq("met_gurudev", False).gte("created_at", today_start).execute()
         mgr_active_guests = res_active.data
         
@@ -93,7 +93,15 @@ if role == "Manager 👔":
             st.info("No guests are currently active inside the building.")
         else:
             for ag in mgr_active_guests:
-                st.markdown(f"**{ag['guest_name']}** | Lounge: **{ag['lounge']}**")
+                # Placed name and undo button side-by-side
+                col_name, col_undo = st.columns([3, 1])
+                
+                col_name.markdown(f"**{ag['guest_name']}** | Lounge: **{ag['lounge']}**")
+                
+                if col_undo.button("↩️ Undo", key=f"undo_{ag['id']}", help="Move back to incoming"):
+                    conn.table("guests").update({"is_active": False}).eq("id", ag['id']).execute()
+                    st.toast(f"Moved {ag['guest_name']} back to Incoming!")
+                    st.rerun()
 
         st.write("---") 
 
