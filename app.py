@@ -50,14 +50,13 @@ if role == "Manager 👔":
                 del st.query_params["logged_in"]
             st.rerun()
             
-        # --- 1. EXPECTED GUESTS CHECK-IN (WITH SEARCH & HORIZONTAL BUTTONS) ---
+        # --- 1. EXPECTED GUESTS CHECK-IN ---
         st.subheader("📥 Incoming Guests")
         st.caption("Tap a lounge pill to instantly check a guest in.")
         
         res = conn.table("guests").select("*").eq("is_active", False).eq("has_left_kaveri", False).gte("created_at", today_start).execute()
         expected_guests = res.data
 
-        # Manager Search Bar
         search_incoming = st.text_input("🔍 Search Expected Guest...", "", placeholder="Type a name to filter...")
         filtered_expected = [g for g in expected_guests if search_incoming.lower() in g['guest_name'].lower()]
 
@@ -71,7 +70,6 @@ if role == "Manager 👔":
                 with st.container(border=True):
                     st.markdown(f"**👤 {guest['guest_name']}** ({guest['session_type']})")
                     
-                    # Horizontal, ultra-compact "Pills" replacing the bulky stacked buttons
                     selected_lounge = st.pills("Assign Lounge", ["L1", "L2", "L3", "BR", "L5"], key=f"mgr_l_{guest['id']}", label_visibility="collapsed")
                     
                     if selected_lounge:
@@ -84,18 +82,16 @@ if role == "Manager 👔":
 
         st.write("---") 
 
-        # --- 2. ARRIVED GUESTS (WITH UNDO BUTTON) ---
+        # --- 2. ARRIVED GUESTS ---
         st.subheader("🟢 Arrived Guests")
-        res_active = conn.table("guests").select("*").eq("is_active", True).eq("met_gurudev", False).gte("created_at", today_start).execute()
+        res_active = conn.table("guests").select("*").eq("is_active", True).eq("jai_gurudev", False).gte("created_at", today_start).execute()
         mgr_active_guests = res_active.data
         
         if not mgr_active_guests:
             st.info("No guests are currently active inside the building.")
         else:
             for ag in mgr_active_guests:
-                # Placed name and undo button side-by-side
                 col_name, col_undo = st.columns([3, 1])
-                
                 col_name.markdown(f"**{ag['guest_name']}** | Lounge: **{ag['lounge']}**")
                 
                 if col_undo.button("↩️ Undo", key=f"undo_{ag['id']}", help="Move back to incoming"):
@@ -129,19 +125,16 @@ if role == "Manager 👔":
 elif role == "On-Ground Team 🏃":
     st.subheader("📍 Active Guests")
 
-    # --- REALTIME AUTO-REFRESH ENGINE ---
     @st.fragment(run_every="10s")
     def team_dashboard():
-        res = conn.table("guests").select("*").eq("is_active", True).eq("met_gurudev", False).gte("created_at", today_start).execute()
+        res = conn.table("guests").select("*").eq("is_active", True).eq("jai_gurudev", False).gte("created_at", today_start).execute()
         active_guests = res.data
 
         if not active_guests:
             st.success("No active guests currently waiting. Take a breather! ☕")
             return
             
-        # --- THE FILTER BAR ---
         search_query = st.text_input("🔍 Search Guest Name...", "", placeholder="Type a name to filter the list below...")
-        
         filtered_guests = [g for g in active_guests if search_query.lower() in g['guest_name'].lower()]
 
         if not filtered_guests:
@@ -150,25 +143,22 @@ elif role == "On-Ground Team 🏃":
         for guest in filtered_guests:
             current_lounge = guest.get('lounge', 'L1')
             
-            # --- CMYK COLOR CODING MAPPING ---
             color_map = {
-                "L1": ("#00FFFF", "#000000"), # Cyan (Black text)
-                "L2": ("#FFFF00", "#000000"), # Yellow (Black text)
-                "L3": ("#FF00FF", "#FFFFFF"), # Magenta (White text)
-                "L5": ("#000000", "#FFFFFF"), # Black (White text)
-                "BR": ("#E0E0E0", "#000000")  # Default Gray
+                "L1": ("#00FFFF", "#000000"),
+                "L2": ("#FFFF00", "#000000"),
+                "L3": ("#FF00FF", "#FFFFFF"),
+                "L5": ("#000000", "#FFFFFF"),
+                "BR": ("#E0E0E0", "#000000") 
             }
             bg_color, text_color = color_map.get(current_lounge, ("#E0E0E0", "#000000"))
 
             with st.container(border=True):
-                # HTML injection for the colored banner
                 st.markdown(
                     f'<div style="background-color: {bg_color}; color: {text_color}; padding: 8px; border-radius: 5px; text-align: center; font-weight: bold; margin-bottom: 10px; font-size: 18px;">'
                     f'👤 {guest["guest_name"]} &nbsp;|&nbsp; {current_lounge}</div>', 
                     unsafe_allow_html=True
                 )
                 
-                # --- AUTO-SAVING LOUNGE CHANGE ---
                 lounge_options = ["L1", "L2", "L3", "BR", "L5"]
                 if current_lounge not in lounge_options:
                     lounge_options.insert(0, current_lounge)
@@ -178,65 +168,53 @@ elif role == "On-Ground Team 🏃":
                     conn.table("guests").update({"lounge": new_lounge}).eq("id", guest['id']).execute()
                     st.rerun()
 
-                # --- HORIZONTAL MULTI-SELECT PILLS (Replaces vertical toggles) ---
-                options = ["📺 LMW", "💻 IP Demo", "⏳ GMR Ready", "🙏 Jai Gurudev"]
-                
-                # Fetch default states
+                # --- 2x2 COMPACT TOGGLE GRID ---
                 vid_val = guest.get('video_watched', False)
                 demo_val = guest.get('ip_demo_done', False)
+                ready_val = guest.get('ready_to_meet_gurudev', False)
                 guru_val = guest.get('met_gurudev', False)
-                ready_val = True if guru_val else guest.get('ready_to_meet_gurudev', False)
                 
-                defaults = []
-                if vid_val: defaults.append("📺 LMW")
-                if demo_val: defaults.append("💻 IP Demo")
-                if ready_val: defaults.append("⏳ GMR Ready")
-                if guru_val: defaults.append("🙏 Jai Gurudev")
+                c1, c2 = st.columns(2)
+                new_vid = c1.toggle("📺 LMW", value=vid_val, key=f"vid_{guest['id']}")
+                new_demo = c2.toggle("💻 IP Demo", value=demo_val, key=f"ip_{guest['id']}")
 
-                selected_statuses = st.pills(
-                    "Status Toggles", 
-                    options, 
-                    default=defaults, 
-                    selection_mode="multi", 
-                    key=f"pills_{guest['id']}", 
-                    label_visibility="collapsed"
-                )
+                c3, c4 = st.columns(2)
+                # Renamed "GMR Ready" to "Ready for Vyas"
+                new_ready = c3.toggle("⏳ Ready for Vyas", value=ready_val, key=f"ready_{guest['id']}")
+                new_guru = c4.toggle("🤝 Met Gurudev", value=guru_val, key=f"guru_{guest['id']}")
 
-                # BUG FIX: Ensure these perfectly match the strings inside the 'options' list!
-                new_vid = "📺 LMW" in selected_statuses
-                new_demo = "💻 IP Demo" in selected_statuses
-                new_ready = "⏳ GMR Ready" in selected_statuses
-                new_guru = "🙏 Jai Gurudev" in selected_statuses
-
-                # Auto-save changes
+                # Auto-save changes for toggles
                 if new_vid != vid_val or new_demo != demo_val or new_ready != ready_val or new_guru != guru_val:
                     update_data = {}
                     if new_vid != vid_val: update_data["video_watched"] = new_vid
                     if new_demo != demo_val: update_data["ip_demo_done"] = new_demo
                     if new_ready != ready_val: update_data["ready_to_meet_gurudev"] = new_ready
-                    
-                    if new_guru != guru_val:
-                        update_data["met_gurudev"] = new_guru
-                        if new_guru:
-                            update_data["ready_to_meet_gurudev"] = True
-                            new_ready = True # Force ready for WhatsApp msg
+                    if new_guru != guru_val: update_data["met_gurudev"] = new_guru
                             
                     conn.table("guests").update(update_data).eq("id", guest['id']).execute()
-                    if new_guru:
-                        st.toast(f"{guest['guest_name']} met Gurudev! Removing from list...")
                     st.rerun()
                 
-                # --- WHATSAPP MESSAGE (Formatted exactly as requested) ---
+                # --- WHATSAPP MESSAGE ---
+                # Excluded the "Visit Complete" / "Jai Gurudev" variable entirely from the message
                 msg = (
                     f"*{new_lounge}*\n"
                     f"{guest['guest_name']}\n"
                     f"📺 LMW: {'✅' if new_vid else '❌'}\n"
                     f"💻 IP Demo: {'✅' if new_demo else '❌'}\n"
-                    f"⏳ GMR Ready: {'✅' if new_ready else '❌'}\n"
-                    f"🙏 Jai Gurudev: {'✅' if new_guru else '❌'}"
+                    f"⏳ Ready for Vyas: {'✅' if new_ready else '❌'}\n"
+                    f"🤝 Met Gurudev: {'✅' if new_guru else '❌'}"
                 )
                 wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
-                st.link_button("📲 Send WhatsApp Update", wa_url, use_container_width=True)
+                
+                # --- ACTION BUTTONS (BOTTOM ROW) ---
+                btn_col1, btn_col2 = st.columns(2)
+                btn_col1.link_button("📲 WhatsApp", wa_url, use_container_width=True)
+                
+                # Renamed the action button to "Visit Complete"
+                if btn_col2.button("✅ Visit Complete", type="primary", use_container_width=True, key=f"jai_btn_{guest['id']}"):
+                    # We continue to use the 'jai_gurudev' column in the database under the hood
+                    conn.table("guests").update({"jai_gurudev": True}).eq("id", guest['id']).execute()
+                    st.toast(f"Visit complete for {guest['guest_name']}! Removing from active list...")
+                    st.rerun()
 
-    # Render the auto-refreshing UI
     team_dashboard()
