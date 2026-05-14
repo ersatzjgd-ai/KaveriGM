@@ -168,20 +168,20 @@ elif role == "On-Ground Team 🏃":
                     conn.table("guests").update({"lounge": new_lounge}).eq("id", guest['id']).execute()
                     st.rerun()
 
-                # --- NEW EMOJI SEGMENTED CONTROLS ---
-                lmw_val = guest.get('lmw_status', '❌')
-                demo_val = guest.get('demo_status', '❌')
+                # --- 3-STATE SEGMENTED CONTROLS (English Text) ---
+                lmw_val = guest.get('lmw_status', 'Not yet')
+                demo_val = guest.get('demo_status', 'Not yet')
                 ready_val = guest.get('ready_to_meet_gurudev', False)
                 guru_val = guest.get('met_gurudev', False)
                 
-                # Row 1: 3-State Controls (Emoji Only)
+                # Row 1: 3-State Controls
                 c1, c2 = st.columns(2)
                 with c1:
                     st.caption("📺 LMW")
-                    new_lmw = st.segmented_control("LMW", ["❌", "▶️", "✅"], default=lmw_val, key=f"lmw_{guest['id']}", label_visibility="collapsed")
+                    new_lmw = st.segmented_control("LMW", ["Not yet", "Started", "Done"], default=lmw_val, key=f"lmw_{guest['id']}", label_visibility="collapsed")
                 with c2:
                     st.caption("💻 IP Demo")
-                    new_demo = st.segmented_control("Demo", ["❌", "▶️", "✅"], default=demo_val, key=f"demo_{guest['id']}", label_visibility="collapsed")
+                    new_demo = st.segmented_control("Demo", ["Not yet", "Started", "Done"], default=demo_val, key=f"demo_{guest['id']}", label_visibility="collapsed")
 
                 # Row 2: Standard Toggles
                 c3, c4 = st.columns(2)
@@ -204,15 +204,11 @@ elif role == "On-Ground Team 🏃":
                     st.rerun()
                 
                 # --- WHATSAPP MESSAGE ---
-                # Translate emoji states to readable text for WhatsApp
-                lmw_text = "❌" if new_lmw == "❌" else f"⏳ Started" if new_lmw == "▶️" else "✅ Completed"
-                demo_text = "❌" if new_demo == "❌" else f"⏳ Started" if new_demo == "▶️" else "✅ Completed"
-
                 msg = (
                     f"*{new_lounge}*\n"
                     f"{guest['guest_name']}\n"
-                    f"📺 LMW: {lmw_text}\n"
-                    f"💻 IP Demo: {demo_text}\n"
+                    f"📺 LMW: {new_lmw}\n"
+                    f"💻 IP Demo: {new_demo}\n"
                     f"⏳ Ready for Vyas: {'✅' if new_ready else '❌'}\n"
                     f"🤝 Met Gurudev: {'✅' if new_guru else '❌'}"
                 )
