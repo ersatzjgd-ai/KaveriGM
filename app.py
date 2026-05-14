@@ -168,26 +168,35 @@ elif role == "On-Ground Team 🏃":
                     conn.table("guests").update({"lounge": new_lounge}).eq("id", guest['id']).execute()
                     st.rerun()
 
-                # --- 2x2 COMPACT TOGGLE GRID ---
-                vid_val = guest.get('video_watched', False)
-                demo_val = guest.get('ip_demo_done', False)
+                # --- NEW EMOJI SEGMENTED CONTROLS ---
+                lmw_val = guest.get('lmw_status', '❌')
+                demo_val = guest.get('demo_status', '❌')
                 ready_val = guest.get('ready_to_meet_gurudev', False)
                 guru_val = guest.get('met_gurudev', False)
                 
+                # Row 1: 3-State Controls (Emoji Only)
                 c1, c2 = st.columns(2)
-                new_vid = c1.toggle("📺 LMW", value=vid_val, key=f"vid_{guest['id']}")
-                new_demo = c2.toggle("💻 IP Demo", value=demo_val, key=f"ip_{guest['id']}")
+                with c1:
+                    st.caption("📺 LMW")
+                    new_lmw = st.segmented_control("LMW", ["❌", "▶️", "✅"], default=lmw_val, key=f"lmw_{guest['id']}", label_visibility="collapsed")
+                with c2:
+                    st.caption("💻 IP Demo")
+                    new_demo = st.segmented_control("Demo", ["❌", "▶️", "✅"], default=demo_val, key=f"demo_{guest['id']}", label_visibility="collapsed")
 
+                # Row 2: Standard Toggles
                 c3, c4 = st.columns(2)
-                # Renamed "GMR Ready" to "Ready for Vyas"
                 new_ready = c3.toggle("⏳ Ready for Vyas", value=ready_val, key=f"ready_{guest['id']}")
                 new_guru = c4.toggle("🤝 Met Gurudev", value=guru_val, key=f"guru_{guest['id']}")
 
-                # Auto-save changes for toggles
-                if new_vid != vid_val or new_demo != demo_val or new_ready != ready_val or new_guru != guru_val:
+                # Prevent segmented controls from returning 'None' if unclicked (fallback to current DB value)
+                if new_lmw is None: new_lmw = lmw_val
+                if new_demo is None: new_demo = demo_val
+
+                # Auto-save changes
+                if new_lmw != lmw_val or new_demo != demo_val or new_ready != ready_val or new_guru != guru_val:
                     update_data = {}
-                    if new_vid != vid_val: update_data["video_watched"] = new_vid
-                    if new_demo != demo_val: update_data["ip_demo_done"] = new_demo
+                    if new_lmw != lmw_val: update_data["lmw_status"] = new_lmw
+                    if new_demo != demo_val: update_data["demo_status"] = new_demo
                     if new_ready != ready_val: update_data["ready_to_meet_gurudev"] = new_ready
                     if new_guru != guru_val: update_data["met_gurudev"] = new_guru
                             
@@ -195,24 +204,26 @@ elif role == "On-Ground Team 🏃":
                     st.rerun()
                 
                 # --- WHATSAPP MESSAGE ---
-                # Excluded the "Visit Complete" / "Jai Gurudev" variable entirely from the message
+                # Translate emoji states to readable text for WhatsApp
+                lmw_text = "❌" if new_lmw == "❌" else f"⏳ Started" if new_lmw == "▶️" else "✅ Completed"
+                demo_text = "❌" if new_demo == "❌" else f"⏳ Started" if new_demo == "▶️" else "✅ Completed"
+
                 msg = (
                     f"*{new_lounge}*\n"
                     f"{guest['guest_name']}\n"
-                    f"📺 LMW: {'✅' if new_vid else '❌'}\n"
-                    f"💻 IP Demo: {'✅' if new_demo else '❌'}\n"
+                    f"📺 LMW: {lmw_text}\n"
+                    f"💻 IP Demo: {demo_text}\n"
                     f"⏳ Ready for Vyas: {'✅' if new_ready else '❌'}\n"
                     f"🤝 Met Gurudev: {'✅' if new_guru else '❌'}"
                 )
                 wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
                 
                 # --- ACTION BUTTONS (BOTTOM ROW) ---
+                st.write("") # Quick spacer
                 btn_col1, btn_col2 = st.columns(2)
                 btn_col1.link_button("📲 WhatsApp", wa_url, use_container_width=True)
                 
-                # Renamed the action button to "Visit Complete"
                 if btn_col2.button("✅ Visit Complete", type="primary", use_container_width=True, key=f"jai_btn_{guest['id']}"):
-                    # We continue to use the 'jai_gurudev' column in the database under the hood
                     conn.table("guests").update({"jai_gurudev": True}).eq("id", guest['id']).execute()
                     st.toast(f"Visit complete for {guest['guest_name']}! Removing from active list...")
                     st.rerun()
