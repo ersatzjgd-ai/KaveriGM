@@ -55,7 +55,8 @@ if role == "Manager 👔":
         st.subheader("📥 Incoming Guests")
         st.caption("Capture a photo, then tap a lounge pill to check-in.")
         
-        res = conn.table("guests").select("*").eq("is_active", False).eq("has_left_kaveri", False).gte("created_at", today_start).execute()
+        # FIX: Added .order("created_at") to lock the list in place
+        res = conn.table("guests").select("*").eq("is_active", False).eq("has_left_kaveri", False).gte("created_at", today_start).order("created_at").execute()
         expected_guests = res.data
 
         search_incoming = st.text_input("🔍 Search Expected Guest...", "", placeholder="Type a name to filter...")
@@ -71,7 +72,6 @@ if role == "Manager 👔":
                 with st.container(border=True):
                     st.markdown(f"**👤 {guest['guest_name']}** ({guest['session_type']})")
                     
-                    # --- NEW: PHOTO CAPTURE EXPANDER ---
                     with st.expander("📸 Capture Photo (Optional)", expanded=False):
                         pic = st.camera_input("Take Photo", key=f"cam_{guest['id']}", label_visibility="collapsed")
                     
@@ -83,19 +83,19 @@ if role == "Manager 👔":
                             "lounge": selected_lounge
                         }
                         
-                        # Encode and attach the photo if the manager took one!
                         if pic is not None:
                             update_data["photo_data"] = base64.b64encode(pic.getvalue()).decode()
                             
                         conn.table("guests").update(update_data).eq("id", guest['id']).execute()
                         st.toast(f"{guest['guest_name']} sent to {selected_lounge}!")
-                        st.rerun()
+                        st.rerun() # We keep rerun here because the guest needs to physically leave this list
 
         st.write("---") 
 
         # --- 2. ARRIVED GUESTS ---
         st.subheader("🟢 Arrived Guests")
-        res_active = conn.table("guests").select("*").eq("is_active", True).eq("jai_gurudev", False).gte("created_at", today_start).execute()
+        # FIX: Added .order("created_at") to lock the list in place
+        res_active = conn.table("guests").select("*").eq("is_active", True).eq("jai_gurudev", False).gte("created_at", today_start).order("created_at").execute()
         mgr_active_guests = res_active.data
         
         if not mgr_active_guests:
@@ -108,7 +108,7 @@ if role == "Manager 👔":
                 if col_undo.button("↩️ Undo", key=f"undo_{ag['id']}", help="Move back to incoming"):
                     conn.table("guests").update({"is_active": False}).eq("id", ag['id']).execute()
                     st.toast(f"Moved {ag['guest_name']} back to Incoming!")
-                    st.rerun()
+                    st.rerun() # Keep rerun here to move them off the list
 
         st.write("---") 
 
@@ -138,7 +138,8 @@ elif role == "On-Ground Team 🏃":
 
     @st.fragment(run_every="10s")
     def team_dashboard():
-        res = conn.table("guests").select("*").eq("is_active", True).eq("jai_gurudev", False).gte("created_at", today_start).execute()
+        # FIX: Added .order("created_at") to permanently stop the shuffling!
+        res = conn.table("guests").select("*").eq("is_active", True).eq("jai_gurudev", False).gte("created_at", today_start).order("created_at").execute()
         active_guests = res.data
 
         if not active_guests:
@@ -170,7 +171,6 @@ elif role == "On-Ground Team 🏃":
                     unsafe_allow_html=True
                 )
                 
-                # --- LAYOUT UPDATE: LOUNGE DROPDOWN & PHOTO POPOVER SIDE-BY-SIDE ---
                 col_lounge, col_photo = st.columns([3, 1])
                 
                 with col_lounge:
@@ -179,16 +179,15 @@ elif role == "On-Ground Team 🏃":
                         lounge_options.insert(0, current_lounge)
                         
                     new_lounge = st.selectbox("Update Lounge:", options=lounge_options, index=lounge_options.index(current_lounge), key=f"staff_l_{guest['id']}", label_visibility="collapsed")
+                    
+                    # FIX: Removed st.rerun() from here to stop the glitching/bouncing
                     if new_lounge != current_lounge:
                         conn.table("guests").update({"lounge": new_lounge}).eq("id", guest['id']).execute()
-                        st.rerun()
 
                 with col_photo:
-                    # The popover acts like a button but reveals content when clicked
                     with st.popover("📸", use_container_width=True):
                         photo_b64 = guest.get('photo_data')
                         if photo_b64:
-                            # Decode and display the image
                             st.image(base64.b64decode(photo_b64), use_container_width=True)
                         else:
                             st.info("No photo captured.")
@@ -199,7 +198,6 @@ elif role == "On-Ground Team 🏃":
                 ready_val = guest.get('ready_to_meet_gurudev', False)
                 guru_val = guest.get('met_gurudev', False)
                 
-                # Row 1: 3-State Controls
                 c1, c2 = st.columns(2)
                 with c1:
                     st.caption("📺 LMW")
@@ -208,16 +206,14 @@ elif role == "On-Ground Team 🏃":
                     st.caption("💻 IP Demo")
                     new_demo = st.segmented_control("Demo", ["Not yet", "Started", "Done"], default=demo_val, key=f"demo_{guest['id']}", label_visibility="collapsed")
 
-                # Row 2: Standard Toggles
                 c3, c4 = st.columns(2)
                 new_ready = c3.toggle("⏳ Ready for Vyas", value=ready_val, key=f"ready_{guest['id']}")
                 new_guru = c4.toggle("🤝 Met Gurudev", value=guru_val, key=f"guru_{guest['id']}")
 
-                # Prevent segmented controls from returning 'None' if unclicked
                 if new_lmw is None: new_lmw = lmw_val
                 if new_demo is None: new_demo = demo_val
 
-                # Auto-save changes
+                # FIX: Removed st.rerun() from here entirely. This stops the app from snapping back to old data!
                 if new_lmw != lmw_val or new_demo != demo_val or new_ready != ready_val or new_guru != guru_val:
                     update_data = {}
                     if new_lmw != lmw_val: update_data["lmw_status"] = new_lmw
@@ -226,7 +222,6 @@ elif role == "On-Ground Team 🏃":
                     if new_guru != guru_val: update_data["met_gurudev"] = new_guru
                             
                     conn.table("guests").update(update_data).eq("id", guest['id']).execute()
-                    st.rerun()
                 
                 # --- WHATSAPP MESSAGE ---
                 msg = (
@@ -240,13 +235,13 @@ elif role == "On-Ground Team 🏃":
                 wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
                 
                 # --- ACTION BUTTONS (BOTTOM ROW) ---
-                st.write("") # Quick spacer
+                st.write("") 
                 btn_col1, btn_col2 = st.columns(2)
                 btn_col1.link_button("📲 WhatsApp", wa_url, use_container_width=True)
                 
                 if btn_col2.button("✅ Visit Complete", type="primary", use_container_width=True, key=f"jai_btn_{guest['id']}"):
                     conn.table("guests").update({"jai_gurudev": True}).eq("id", guest['id']).execute()
                     st.toast(f"Visit complete for {guest['guest_name']}! Removing from active list...")
-                    st.rerun()
+                    st.rerun() # Keep rerun here because they MUST leave the screen.
 
     team_dashboard()
