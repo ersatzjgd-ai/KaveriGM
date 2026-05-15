@@ -51,11 +51,9 @@ if role == "Manager 👔":
                 del st.query_params["logged_in"]
             st.rerun()
             
-        # --- 1. EXPECTED GUESTS CHECK-IN ---
         st.subheader("📥 Incoming Guests")
         st.caption("Capture a photo, then tap a lounge pill to check-in.")
         
-        # FIX: Added .order("created_at") to lock the list in place
         res = conn.table("guests").select("*").eq("is_active", False).eq("has_left_kaveri", False).gte("created_at", today_start).order("created_at").execute()
         expected_guests = res.data
 
@@ -88,13 +86,11 @@ if role == "Manager 👔":
                             
                         conn.table("guests").update(update_data).eq("id", guest['id']).execute()
                         st.toast(f"{guest['guest_name']} sent to {selected_lounge}!")
-                        st.rerun() # We keep rerun here because the guest needs to physically leave this list
+                        st.rerun()
 
         st.write("---") 
 
-        # --- 2. ARRIVED GUESTS ---
         st.subheader("🟢 Arrived Guests")
-        # FIX: Added .order("created_at") to lock the list in place
         res_active = conn.table("guests").select("*").eq("is_active", True).eq("jai_gurudev", False).gte("created_at", today_start).order("created_at").execute()
         mgr_active_guests = res_active.data
         
@@ -108,11 +104,10 @@ if role == "Manager 👔":
                 if col_undo.button("↩️ Undo", key=f"undo_{ag['id']}", help="Move back to incoming"):
                     conn.table("guests").update({"is_active": False}).eq("id", ag['id']).execute()
                     st.toast(f"Moved {ag['guest_name']} back to Incoming!")
-                    st.rerun() # Keep rerun here to move them off the list
+                    st.rerun()
 
         st.write("---") 
 
-        # --- 3. ADD GUESTS FEATURE ---
         with st.expander("➕ Add New Expected Guests", expanded=False):
             with st.form("add_guests_form", clear_on_submit=True):
                 session_type = st.radio("Session", ["Morning", "Evening"], horizontal=True)
@@ -136,9 +131,14 @@ if role == "Manager 👔":
 elif role == "On-Ground Team 🏃":
     st.subheader("📍 Active Guests")
 
+    # --- THE ANTI-GLITCH BACKGROUND SAVER ---
+    # This securely updates the database in the background without reloading the page!
+    def update_guest_db(guest_id, column, widget_key):
+        new_val = st.session_state[widget_key]
+        conn.table("guests").update({column: new_val}).eq("id", guest_id).execute()
+
     @st.fragment(run_every="10s")
     def team_dashboard():
-        # FIX: Added .order("created_at") to permanently stop the shuffling!
         res = conn.table("guests").select("*").eq("is_active", True).eq("jai_gurudev", False).gte("created_at", today_start).order("created_at").execute()
         active_guests = res.data
 
@@ -167,7 +167,7 @@ elif role == "On-Ground Team 🏃":
             with st.container(border=True):
                 st.markdown(
                     f'<div style="background-color: {bg_color}; color: {text_color}; padding: 8px; border-radius: 5px; text-align: center; font-weight: bold; margin-bottom: 10px; font-size: 18px;">'
-                    f'👤 {guest["guest_name"]} &nbsp;|&nbsp; {current_lounge}</div>', 
+                    f'👤 {guest["guest_name"]}</div>', 
                     unsafe_allow_html=True
                 )
                 
@@ -178,11 +178,8 @@ elif role == "On-Ground Team 🏃":
                     if current_lounge not in lounge_options:
                         lounge_options.insert(0, current_lounge)
                         
-                    new_lounge = st.selectbox("Update Lounge:", options=lounge_options, index=lounge_options.index(current_lounge), key=f"staff_l_{guest['id']}", label_visibility="collapsed")
-                    
-                    # FIX: Removed st.rerun() from here to stop the glitching/bouncing
-                    if new_lounge != current_lounge:
-                        conn.table("guests").update({"lounge": new_lounge}).eq("id", guest['id']).execute()
+                    # Notice the 'on_change' parameter. This triggers the silent background save.
+                    st.selectbox("Update Lounge:", options=lounge_options, index=lounge_options.index(current_lounge), key=f"staff_l_{guest['id']}", label_visibility="collapsed", on_change=update_guest_db, args=(guest['id'], "lounge", f"staff_l_{guest['id']}"))
 
                 with col_photo:
                     with st.popover("📸", use_container_width=True):
@@ -192,56 +189,46 @@ elif role == "On-Ground Team 🏃":
                         else:
                             st.info("No photo captured.")
 
-                # --- 3-STATE SEGMENTED CONTROLS ---
-                lmw_val = guest.get('lmw_status', 'Not yet')
-                demo_val = guest.get('demo_status', 'Not yet')
-                ready_val = guest.get('ready_to_meet_gurudev', False)
-                guru_val = guest.get('met_gurudev', False)
-                
+                # --- 3-STATE SEGMENTED CONTROLS (With Background Save) ---
                 c1, c2 = st.columns(2)
                 with c1:
                     st.caption("📺 LMW")
-                    new_lmw = st.segmented_control("LMW", ["Not yet", "Started", "Done"], default=lmw_val, key=f"lmw_{guest['id']}", label_visibility="collapsed")
+                    st.segmented_control("LMW", ["Not yet", "Started", "Done"], default=guest.get('lmw_status', 'Not yet'), key=f"lmw_{guest['id']}", label_visibility="collapsed", on_change=update_guest_db, args=(guest['id'], "lmw_status", f"lmw_{guest['id']}"))
                 with c2:
                     st.caption("💻 IP Demo")
-                    new_demo = st.segmented_control("Demo", ["Not yet", "Started", "Done"], default=demo_val, key=f"demo_{guest['id']}", label_visibility="collapsed")
+                    st.segmented_control("Demo", ["Not yet", "Started", "Done"], default=guest.get('demo_status', 'Not yet'), key=f"demo_{guest['id']}", label_visibility="collapsed", on_change=update_guest_db, args=(guest['id'], "demo_status", f"demo_{guest['id']}"))
 
+                # --- STANDARD TOGGLES (With Background Save) ---
                 c3, c4 = st.columns(2)
-                new_ready = c3.toggle("⏳ Ready for Vyas", value=ready_val, key=f"ready_{guest['id']}")
-                new_guru = c4.toggle("🤝 Met Gurudev", value=guru_val, key=f"guru_{guest['id']}")
+                st.toggle("⏳ Ready for Vyas", value=guest.get('ready_to_meet_gurudev', False), key=f"ready_{guest['id']}", on_change=update_guest_db, args=(guest['id'], "ready_to_meet_gurudev", f"ready_{guest['id']}"))
+                st.toggle("🤝 Met Gurudev", value=guest.get('met_gurudev', False), key=f"guru_{guest['id']}", on_change=update_guest_db, args=(guest['id'], "met_gurudev", f"guru_{guest['id']}"))
 
-                if new_lmw is None: new_lmw = lmw_val
-                if new_demo is None: new_demo = demo_val
+                # --- INSTANT WHATSAPP LINK ---
+                # We fetch from st.session_state so the WhatsApp message updates instantly before the database even finishes saving!
+                local_lounge = st.session_state.get(f"staff_l_{guest['id']}", current_lounge)
+                local_lmw = st.session_state.get(f"lmw_{guest['id']}", guest.get('lmw_status', 'Not yet'))
+                local_demo = st.session_state.get(f"demo_{guest['id']}", guest.get('demo_status', 'Not yet'))
+                local_ready = st.session_state.get(f"ready_{guest['id']}", guest.get('ready_to_meet_gurudev', False))
+                local_guru = st.session_state.get(f"guru_{guest['id']}", guest.get('met_gurudev', False))
 
-                # FIX: Removed st.rerun() from here entirely. This stops the app from snapping back to old data!
-                if new_lmw != lmw_val or new_demo != demo_val or new_ready != ready_val or new_guru != guru_val:
-                    update_data = {}
-                    if new_lmw != lmw_val: update_data["lmw_status"] = new_lmw
-                    if new_demo != demo_val: update_data["demo_status"] = new_demo
-                    if new_ready != ready_val: update_data["ready_to_meet_gurudev"] = new_ready
-                    if new_guru != guru_val: update_data["met_gurudev"] = new_guru
-                            
-                    conn.table("guests").update(update_data).eq("id", guest['id']).execute()
-                
-                # --- WHATSAPP MESSAGE ---
                 msg = (
-                    f"*{new_lounge}*\n"
+                    f"*{local_lounge}*\n"
                     f"{guest['guest_name']}\n"
-                    f"📺 LMW: {new_lmw}\n"
-                    f"💻 IP Demo: {new_demo}\n"
-                    f"⏳ Ready for Vyas: {'✅' if new_ready else '❌'}\n"
-                    f"🤝 Met Gurudev: {'✅' if new_guru else '❌'}"
+                    f"📺 LMW: {local_lmw}\n"
+                    f"💻 IP Demo: {local_demo}\n"
+                    f"⏳ Ready for Vyas: {'✅' if local_ready else '❌'}\n"
+                    f"🤝 Met Gurudev: {'✅' if local_guru else '❌'}"
                 )
                 wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
                 
-                # --- ACTION BUTTONS (BOTTOM ROW) ---
-                st.write("") 
+                # --- ACTION BUTTONS ---
+                st.markdown("<br>", unsafe_allow_html=True) # Invisible spacer to maintain clean height
                 btn_col1, btn_col2 = st.columns(2)
                 btn_col1.link_button("📲 WhatsApp", wa_url, use_container_width=True)
                 
                 if btn_col2.button("✅ Visit Complete", type="primary", use_container_width=True, key=f"jai_btn_{guest['id']}"):
                     conn.table("guests").update({"jai_gurudev": True}).eq("id", guest['id']).execute()
-                    st.toast(f"Visit complete for {guest['guest_name']}! Removing from active list...")
-                    st.rerun() # Keep rerun here because they MUST leave the screen.
+                    st.toast(f"Visit complete for {guest['guest_name']}! Removing from list...")
+                    st.rerun() # The only necessary rerun left to physically clear the name off the screen.
 
     team_dashboard()
