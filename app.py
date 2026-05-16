@@ -131,12 +131,6 @@ if role == "Manager 👔":
 elif role == "On-Ground Team 🏃":
     st.subheader("📍 Active Guests")
 
-    # --- THE ANTI-GLITCH BACKGROUND SAVER ---
-    # This securely updates the database in the background without reloading the page!
-    def update_guest_db(guest_id, column, widget_key):
-        new_val = st.session_state[widget_key]
-        conn.table("guests").update({column: new_val}).eq("id", guest_id).execute()
-
     @st.fragment(run_every="10s")
     def team_dashboard():
         res = conn.table("guests").select("*").eq("is_active", True).eq("jai_gurudev", False).gte("created_at", today_start).order("created_at").execute()
@@ -146,6 +140,22 @@ elif role == "On-Ground Team 🏃":
             st.success("No active guests currently waiting. Take a breather! ☕")
             return
             
+        # --- 🔒 ANTI-RESHUFFLE & CUSTOM ROOM SORTING LOGIC 🔒 ---
+        if "initial_lounges" not in st.session_state:
+            st.session_state.initial_lounges = {}
+            
+        for g in active_guests:
+            if g['id'] not in st.session_state.initial_lounges:
+                st.session_state.initial_lounges[g['id']] = g.get('lounge', 'L1')
+                
+        room_order = {"L1": 1, "L2": 2, "L3": 3, "BR": 4, "L5": 5}
+        
+        active_guests.sort(key=lambda g: (
+            room_order.get(st.session_state.initial_lounges[g['id']], 99),
+            g['created_at']
+        ))
+        # --------------------------------------------------------
+
         search_query = st.text_input("🔍 Search Guest Name...", "", placeholder="Type a name to filter the list below...")
         filtered_guests = [g for g in active_guests if search_query.lower() in g['guest_name'].lower()]
 
@@ -178,8 +188,8 @@ elif role == "On-Ground Team 🏃":
                     if current_lounge not in lounge_options:
                         lounge_options.insert(0, current_lounge)
                         
-                    # Notice the 'on_change' parameter. This triggers the silent background save.
-                    st.selectbox("Update Lounge:", options=lounge_options, index=lounge_options.index(current_lounge), key=f"staff_l_{guest['id']}", label_visibility="collapsed", on_change=update_guest_db, args=(guest['id'], "lounge", f"staff_l_{guest['id']}"))
+                    # Auto-save removed
+                    st.selectbox("Update Lounge:", options=lounge_options, index=lounge_options.index(current_lounge), key=f"staff_l_{guest['id']}", label_visibility="collapsed")
 
                 with col_photo:
                     with st.popover("📸", use_container_width=True):
@@ -189,22 +199,21 @@ elif role == "On-Ground Team 🏃":
                         else:
                             st.info("No photo captured.")
 
-                # --- 3-STATE SEGMENTED CONTROLS (With Background Save) ---
+                # --- 3-STATE SEGMENTED CONTROLS (Auto-save removed) ---
                 c1, c2 = st.columns(2)
                 with c1:
                     st.caption("📺 LMW")
-                    st.segmented_control("LMW", ["Not yet", "Started", "Done"], default=guest.get('lmw_status', 'Not yet'), key=f"lmw_{guest['id']}", label_visibility="collapsed", on_change=update_guest_db, args=(guest['id'], "lmw_status", f"lmw_{guest['id']}"))
+                    st.segmented_control("LMW", ["Not yet", "Started", "Done"], default=guest.get('lmw_status', 'Not yet'), key=f"lmw_{guest['id']}", label_visibility="collapsed")
                 with c2:
                     st.caption("💻 IP Demo")
-                    st.segmented_control("Demo", ["Not yet", "Started", "Done"], default=guest.get('demo_status', 'Not yet'), key=f"demo_{guest['id']}", label_visibility="collapsed", on_change=update_guest_db, args=(guest['id'], "demo_status", f"demo_{guest['id']}"))
+                    st.segmented_control("Demo", ["Not yet", "Started", "Done"], default=guest.get('demo_status', 'Not yet'), key=f"demo_{guest['id']}", label_visibility="collapsed")
 
-                # --- STANDARD TOGGLES (With Background Save) ---
+                # --- STANDARD TOGGLES (Auto-save removed) ---
                 c3, c4 = st.columns(2)
-                st.toggle("⏳ Ready for Vyas", value=guest.get('ready_to_meet_gurudev', False), key=f"ready_{guest['id']}", on_change=update_guest_db, args=(guest['id'], "ready_to_meet_gurudev", f"ready_{guest['id']}"))
-                st.toggle("🤝 Met Gurudev", value=guest.get('met_gurudev', False), key=f"guru_{guest['id']}", on_change=update_guest_db, args=(guest['id'], "met_gurudev", f"guru_{guest['id']}"))
+                st.toggle("⏳ Ready for Vyas", value=guest.get('ready_to_meet_gurudev', False), key=f"ready_{guest['id']}")
+                st.toggle("🤝 Met Gurudev", value=guest.get('met_gurudev', False), key=f"guru_{guest['id']}")
 
                 # --- INSTANT WHATSAPP LINK ---
-                # We fetch from st.session_state so the WhatsApp message updates instantly before the database even finishes saving!
                 local_lounge = st.session_state.get(f"staff_l_{guest['id']}", current_lounge)
                 local_lmw = st.session_state.get(f"lmw_{guest['id']}", guest.get('lmw_status', 'Not yet'))
                 local_demo = st.session_state.get(f"demo_{guest['id']}", guest.get('demo_status', 'Not yet'))
@@ -222,13 +231,33 @@ elif role == "On-Ground Team 🏃":
                 wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
                 
                 # --- ACTION BUTTONS ---
-                st.markdown("<br>", unsafe_allow_html=True) # Invisible spacer to maintain clean height
-                btn_col1, btn_col2 = st.columns(2)
+                st.markdown("<br>", unsafe_allow_html=True) 
+                
+                # Updated to 3 columns to fit the new Save button
+                btn_col1, btn_col2, btn_col3 = st.columns(3)
+                
                 btn_col1.link_button("📲 WhatsApp", wa_url, use_container_width=True)
                 
-                if btn_col2.button("✅ Visit Complete", type="primary", use_container_width=True, key=f"jai_btn_{guest['id']}"):
+                # The New Manual Save Button
+                if btn_col2.button("💾 Save Updates", use_container_width=True, key=f"save_btn_{guest['id']}"):
+                    update_data = {
+                        "lounge": st.session_state[f"staff_l_{guest['id']}"],
+                        "lmw_status": st.session_state[f"lmw_{guest['id']}"],
+                        "demo_status": st.session_state[f"demo_{guest['id']}"],
+                        "ready_to_meet_gurudev": st.session_state[f"ready_{guest['id']}"],
+                        "met_gurudev": st.session_state[f"guru_{guest['id']}"]
+                    }
+                    conn.table("guests").update(update_data).eq("id", guest['id']).execute()
+                    st.toast(f"✅ Saved updates for {guest['guest_name']}!")
+                    st.rerun() 
+                
+                if btn_col3.button("✅ Complete", type="primary", use_container_width=True, key=f"jai_btn_{guest['id']}"):
                     conn.table("guests").update({"jai_gurudev": True}).eq("id", guest['id']).execute()
+                    
+                    if guest['id'] in st.session_state.initial_lounges:
+                        del st.session_state.initial_lounges[guest['id']]
+                        
                     st.toast(f"Visit complete for {guest['guest_name']}! Removing from list...")
-                    st.rerun() # The only necessary rerun left to physically clear the name off the screen.
+                    st.rerun() 
 
     team_dashboard()
