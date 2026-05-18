@@ -131,6 +131,31 @@ if role == "Manager 👔":
 elif role == "On-Ground Team 🏃":
     st.subheader("📍 Active Guests")
 
+    # --- NO-RERUN CALLBACKS (PREVENTS SCROLL JUMPING) ---
+    def commit_save(g_id, g_name):
+        update_data = {
+            "lounge": st.session_state[f"staff_l_{g_id}"],
+            "lmw_status": st.session_state[f"lmw_{g_id}"],
+            "demo_status": st.session_state[f"demo_{g_id}"],
+            "ready_to_meet_gurudev": st.session_state[f"ready_{g_id}"],
+            "met_gurudev": st.session_state[f"guru_{g_id}"]
+        }
+        conn.table("guests").update(update_data).eq("id", g_id).execute()
+        st.toast(f"✅ Saved updates for {g_name}!")
+
+    def mark_complete(g_id, g_name):
+        conn.table("guests").update({"jai_gurudev": True}).eq("id", g_id).execute()
+        if g_id in st.session_state.initial_lounges:
+            del st.session_state.initial_lounges[g_id]
+        st.toast(f"✅ Visit complete for {g_name}! Removed from list.")
+
+    def commit_photo(g_id, g_name):
+        pic = st.session_state.get(f"staff_cam_{g_id}")
+        if pic is not None:
+            encoded_pic = base64.b64encode(pic.getvalue()).decode()
+            conn.table("guests").update({"photo_data": encoded_pic}).eq("id", g_id).execute()
+            st.toast(f"✅ Photo saved for {g_name}!")
+
     @st.fragment(run_every="10s")
     def team_dashboard():
         res = conn.table("guests").select("*").eq("is_active", True).eq("jai_gurudev", False).gte("created_at", today_start).order("created_at").execute()
@@ -150,6 +175,7 @@ elif role == "On-Ground Team 🏃":
                 
         room_order = {"L1": 1, "L2": 2, "L3": 3, "BR": 4, "L5": 5}
         
+        # Sorts rigidly by initial room, then exactly by arrival time. Ensures ZERO shuffling.
         active_guests.sort(key=lambda g: (
             room_order.get(st.session_state.initial_lounges[g['id']], 99),
             g['created_at']
@@ -188,7 +214,6 @@ elif role == "On-Ground Team 🏃":
                     if current_lounge not in lounge_options:
                         lounge_options.insert(0, current_lounge)
                         
-                    # Auto-save removed
                     st.selectbox("Update Lounge:", options=lounge_options, index=lounge_options.index(current_lounge), key=f"staff_l_{guest['id']}", label_visibility="collapsed")
 
                 with col_photo:
@@ -196,10 +221,16 @@ elif role == "On-Ground Team 🏃":
                         photo_b64 = guest.get('photo_data')
                         if photo_b64:
                             st.image(base64.b64decode(photo_b64), use_container_width=True)
+                            st.caption("Update Photo:")
                         else:
                             st.info("No photo captured.")
+                        
+                        # On-Ground Photo feature with native callback 
+                        new_pic = st.camera_input("Take Photo", key=f"staff_cam_{guest['id']}", label_visibility="collapsed")
+                        if new_pic is not None:
+                            st.button("💾 Save Photo", key=f"save_pic_{guest['id']}", use_container_width=True, on_click=commit_photo, args=(guest['id'], guest['guest_name']))
 
-                # --- 3-STATE SEGMENTED CONTROLS (Auto-save removed) ---
+                # --- 3-STATE SEGMENTED CONTROLS ---
                 c1, c2 = st.columns(2)
                 with c1:
                     st.caption("📺 LMW")
@@ -208,7 +239,7 @@ elif role == "On-Ground Team 🏃":
                     st.caption("💻 IP Demo")
                     st.segmented_control("Demo", ["Not yet", "Started", "Done"], default=guest.get('demo_status', 'Not yet'), key=f"demo_{guest['id']}", label_visibility="collapsed")
 
-                # --- STANDARD TOGGLES (Auto-save removed) ---
+                # --- STANDARD TOGGLES ---
                 c3, c4 = st.columns(2)
                 st.toggle("⏳ Ready for Vyas", value=guest.get('ready_to_meet_gurudev', False), key=f"ready_{guest['id']}")
                 st.toggle("🤝 Met Gurudev", value=guest.get('met_gurudev', False), key=f"guru_{guest['id']}")
@@ -232,32 +263,13 @@ elif role == "On-Ground Team 🏃":
                 
                 # --- ACTION BUTTONS ---
                 st.markdown("<br>", unsafe_allow_html=True) 
-                
-                # Updated to 3 columns to fit the new Save button
                 btn_col1, btn_col2, btn_col3 = st.columns(3)
                 
                 btn_col1.link_button("📲 WhatsApp", wa_url, use_container_width=True)
                 
-                # The New Manual Save Button
-                if btn_col2.button("💾 Save Updates", use_container_width=True, key=f"save_btn_{guest['id']}"):
-                    update_data = {
-                        "lounge": st.session_state[f"staff_l_{guest['id']}"],
-                        "lmw_status": st.session_state[f"lmw_{guest['id']}"],
-                        "demo_status": st.session_state[f"demo_{guest['id']}"],
-                        "ready_to_meet_gurudev": st.session_state[f"ready_{guest['id']}"],
-                        "met_gurudev": st.session_state[f"guru_{guest['id']}"]
-                    }
-                    conn.table("guests").update(update_data).eq("id", guest['id']).execute()
-                    st.toast(f"✅ Saved updates for {guest['guest_name']}!")
-                    st.rerun() 
+                # Manual Save and Complete buttons now use Callbacks to eliminate scroll jumps
+                btn_col2.button("💾 Save Updates", use_container_width=True, key=f"save_btn_{guest['id']}", on_click=commit_save, args=(guest['id'], guest['guest_name']))
                 
-                if btn_col3.button("✅ Complete", type="primary", use_container_width=True, key=f"jai_btn_{guest['id']}"):
-                    conn.table("guests").update({"jai_gurudev": True}).eq("id", guest['id']).execute()
-                    
-                    if guest['id'] in st.session_state.initial_lounges:
-                        del st.session_state.initial_lounges[guest['id']]
-                        
-                    st.toast(f"Visit complete for {guest['guest_name']}! Removing from list...")
-                    st.rerun() 
+                btn_col3.button("✅ Complete", type="primary", use_container_width=True, key=f"jai_btn_{guest['id']}", on_click=mark_complete, args=(guest['id'], guest['guest_name']))
 
     team_dashboard()
