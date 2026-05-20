@@ -124,6 +124,47 @@ if role == "Manager 👔":
                     else:
                         st.error("Please enter at least one guest name.")
 
+        st.write("---")
+
+        # --- 📊 NEW FEATURE: END OF SESSION REPORT ---
+        with st.expander("📊 View End of Session Report", expanded=False):
+            st.subheader("Today's Guest Report")
+            st.caption("A summary of all guests scheduled for today and their final statuses.")
+            
+            # Fetch ALL guests for today regardless of active/completed status
+            report_res = conn.table("guests").select("*").gte("created_at", today_start).order("created_at").execute()
+            report_guests = report_res.data
+            
+            if not report_guests:
+                st.info("No guests have been added for today yet.")
+            else:
+                for rg in report_guests:
+                    with st.container(border=True):
+                        r_col_img, r_col_info = st.columns([1, 2.5])
+                        
+                        with r_col_img:
+                            if rg.get('photo_data'):
+                                st.image(base64.b64decode(rg['photo_data']), use_container_width=True)
+                            else:
+                                st.info("No Photo Available", icon="📷")
+                                
+                        with r_col_info:
+                            st.markdown(f"#### 👤 {rg['guest_name']}")
+                            st.markdown(f"**Session:** {rg.get('session_type', 'N/A')} | **Lounge:** {rg.get('lounge', 'Not Assigned')}")
+                            
+                            # Status indicators
+                            status_col1, status_col2 = st.columns(2)
+                            with status_col1:
+                                st.caption("📺 LMW")
+                                st.write(f"**{rg.get('lmw_status', 'Not yet')}**")
+                                st.caption("💻 IP Demo")
+                                st.write(f"**{rg.get('demo_status', 'Not yet')}**")
+                            with status_col2:
+                                st.caption("🤝 Met Gurudev")
+                                st.write("✅ Yes" if rg.get('met_gurudev') else "❌ No")
+                                st.caption("🏁 Visit Complete")
+                                st.write("✅ Yes" if rg.get('jai_gurudev') else "❌ No")
+
 
 # ==========================================
 #           ON-GROUND TEAM UI
