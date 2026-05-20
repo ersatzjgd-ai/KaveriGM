@@ -3,6 +3,9 @@ from st_supabase_connection import SupabaseConnection
 import urllib.parse
 import base64
 from datetime import datetime
+import tempfile
+import os
+from fpdf import FPDF
 
 # --- CONFIG ---
 st.set_page_config(page_title="Kaveri Guest Manager", layout="centered", initial_sidebar_state="collapsed")
@@ -126,18 +129,18 @@ if role == "Manager 👔":
 
         st.write("---")
 
-        # --- 📊 NEW FEATURE: END OF SESSION REPORT ---
+        # --- 📊 END OF SESSION REPORT WITH PDF EXPORT ---
         with st.expander("📊 View End of Session Report", expanded=False):
             st.subheader("Today's Guest Report")
             st.caption("A summary of all guests scheduled for today and their final statuses.")
             
-            # Fetch ALL guests for today regardless of active/completed status
             report_res = conn.table("guests").select("*").gte("created_at", today_start).order("created_at").execute()
             report_guests = report_res.data
             
             if not report_guests:
                 st.info("No guests have been added for today yet.")
             else:
+                # 1. Render UI Report
                 for rg in report_guests:
                     with st.container(border=True):
                         r_col_img, r_col_info = st.columns([1, 2.5])
@@ -146,13 +149,12 @@ if role == "Manager 👔":
                             if rg.get('photo_data'):
                                 st.image(base64.b64decode(rg['photo_data']), use_container_width=True)
                             else:
-                                st.info("No Photo Available", icon="📷")
+                                st.info("No Photo", icon="📷")
                                 
                         with r_col_info:
                             st.markdown(f"#### 👤 {rg['guest_name']}")
                             st.markdown(f"**Session:** {rg.get('session_type', 'N/A')} | **Lounge:** {rg.get('lounge', 'Not Assigned')}")
                             
-                            # Status indicators
                             status_col1, status_col2 = st.columns(2)
                             with status_col1:
                                 st.caption("📺 LMW")
@@ -164,6 +166,69 @@ if role == "Manager 👔":
                                 st.write("✅ Yes" if rg.get('met_gurudev') else "❌ No")
                                 st.caption("🏁 Visit Complete")
                                 st.write("✅ Yes" if rg.get('jai_gurudev') else "❌ No")
+
+                # 2. PDF Generation Logic
+                def generate_pdf(guests_data):
+                    pdf = FPDF()
+                    pdf.set_auto_page_break(auto=True, margin=15)
+                    pdf.add_page()
+                    
+                    # Title
+                    pdf.set_font("Arial", 'B', 16)
+                    pdf.cell(0, 10, txt=f"Kaveri GM - End of Session Report ({datetime.now().strftime('%Y-%m-%d')})", ln=True, align='C')
+                    pdf.ln(5)
+                    
+                    for g in guests_data:
+                        pdf.set_font("Arial", 'B', 12)
+                        pdf.cell(0, 8, txt=f"Guest: {g['guest_name']} ({g.get('session_type', 'N/A')})", ln=True)
+                        
+                        pdf.set_font("Arial", '', 10)
+                        pdf.cell(0, 6, txt=f"Lounge: {g.get('lounge', 'Not Assigned')}", ln=True)
+                        
+                        lmw = g.get('lmw_status', 'Not yet')
+                        demo = g.get('demo_status', 'Not yet')
+                        pdf.cell(0, 6, txt=f"LMW: {lmw} | IP Demo: {demo}", ln=True)
+                        
+                        guru = "Yes" if g.get('met_gurudev') else "No"
+                        jai = "Yes" if g.get('jai_gurudev') else "No"
+                        pdf.cell(0, 6, txt=f"Met Gurudev: {guru} | Visit Complete: {jai}", ln=True)
+                        
+                        # Handle Photo
+                        if g.get('photo_data'):
+                            try:
+                                img_bytes = base64.b64decode(g['photo_data'])
+                                # Safely write image to temporary file for FPDF to read
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_file:
+                                    tmp_file.write(img_bytes)
+                                    tmp_path = tmp_file.name
+                                
+                                pdf.ln(2)
+                                pdf.image(tmp_path, w=35)
+                                os.remove(tmp_path)
+                            except Exception:
+                                pdf.cell(0, 6, txt="[Error loading photo]", ln=True)
+                                
+                        pdf.ln(5)
+                        pdf.line(10, pdf.get_y(), 200, pdf.get_y()) # Separator line
+                        pdf.ln(5)
+                    
+                    # FPDF outputs differently depending on version. This safely extracts bytes.
+                    try:
+                        return pdf.output(dest='S').encode('latin-1')
+                    except Exception:
+                        return bytes(pdf.output())
+
+                # 3. PDF Download Button
+                st.write("---")
+                pdf_bytes = generate_pdf(report_guests)
+                st.download_button(
+                    label="📥 Download Report as PDF",
+                    data=pdf_bytes,
+                    file_name=f"Kaveri_Report_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                    type="primary",
+                    use_container_width=True
+                )
 
 
 # ==========================================
