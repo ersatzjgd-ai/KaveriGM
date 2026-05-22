@@ -233,6 +233,7 @@ if role == "Manager 👔":
 #           ON-GROUND TEAM UI
 # ==========================================
 elif role == "On-Ground Team 🏃":
+    st.subheader("📍 Active Guests")
 
     # --- NO-RERUN CALLBACKS (PREVENTS SCROLL JUMPING) ---
     def commit_save(g_id, g_name):
@@ -274,8 +275,7 @@ elif role == "On-Ground Team 🏃":
             st.success("No active guests currently waiting. Take a breather! ☕")
             return
             
-        # --- NEW UI: LOUNGE FILTER ---
-        st.subheader("📍 Lounge Filter")
+        # --- UI: LOUNGE FILTER (Title Removed for space) ---
         selected_view = st.pills("Select your station", ["All", "L1", "L2", "L3", "BR", "L5"], default="All", key="lounge_tab_selector", label_visibility="collapsed")
         st.write("---")
 
