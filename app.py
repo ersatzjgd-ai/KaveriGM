@@ -140,7 +140,6 @@ if role == "Manager 👔":
             if not report_guests:
                 st.info("No guests have been added for today yet.")
             else:
-                # 1. Render UI Report
                 for rg in report_guests:
                     with st.container(border=True):
                         r_col_img, r_col_info = st.columns([1, 2.5])
@@ -167,37 +166,38 @@ if role == "Manager 👔":
                                 st.caption("🏁 Visit Complete")
                                 st.write("✅ Yes" if rg.get('jai_gurudev') else "❌ No")
 
-                # 2. PDF Generation Logic
+                def sanitize_text(val):
+                    if not val: return ""
+                    s = str(val).replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"').replace("–", "-")
+                    return s.encode('latin-1', 'replace').decode('latin-1')
+
                 def generate_pdf(guests_data):
                     pdf = FPDF()
                     pdf.set_auto_page_break(auto=True, margin=15)
                     pdf.add_page()
                     
-                    # Title
                     pdf.set_font("Arial", 'B', 16)
-                    pdf.cell(0, 10, txt=f"Kaveri GM - End of Session Report ({datetime.now().strftime('%Y-%m-%d')})", ln=True, align='C')
+                    pdf.cell(0, 10, txt=sanitize_text(f"Kaveri GM - End of Session Report ({datetime.now().strftime('%Y-%m-%d')})"), ln=True, align='C')
                     pdf.ln(5)
                     
                     for g in guests_data:
                         pdf.set_font("Arial", 'B', 12)
-                        pdf.cell(0, 8, txt=f"Guest: {g['guest_name']} ({g.get('session_type', 'N/A')})", ln=True)
+                        pdf.cell(0, 8, txt=sanitize_text(f"Guest: {g['guest_name']} ({g.get('session_type', 'N/A')})"), ln=True)
                         
                         pdf.set_font("Arial", '', 10)
-                        pdf.cell(0, 6, txt=f"Lounge: {g.get('lounge', 'Not Assigned')}", ln=True)
+                        pdf.cell(0, 6, txt=sanitize_text(f"Lounge: {g.get('lounge', 'Not Assigned')}"), ln=True)
                         
                         lmw = g.get('lmw_status', 'Not yet')
                         demo = g.get('demo_status', 'Not yet')
-                        pdf.cell(0, 6, txt=f"LMW: {lmw} | IP Demo: {demo}", ln=True)
+                        pdf.cell(0, 6, txt=sanitize_text(f"LMW: {lmw} | IP Demo: {demo}"), ln=True)
                         
                         guru = "Yes" if g.get('met_gurudev') else "No"
                         jai = "Yes" if g.get('jai_gurudev') else "No"
-                        pdf.cell(0, 6, txt=f"Met Gurudev: {guru} | Visit Complete: {jai}", ln=True)
+                        pdf.cell(0, 6, txt=sanitize_text(f"Met Gurudev: {guru} | Visit Complete: {jai}"), ln=True)
                         
-                        # Handle Photo
                         if g.get('photo_data'):
                             try:
                                 img_bytes = base64.b64decode(g['photo_data'])
-                                # Safely write image to temporary file for FPDF to read
                                 with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_file:
                                     tmp_file.write(img_bytes)
                                     tmp_path = tmp_file.name
@@ -206,19 +206,17 @@ if role == "Manager 👔":
                                 pdf.image(tmp_path, w=35)
                                 os.remove(tmp_path)
                             except Exception:
-                                pdf.cell(0, 6, txt="[Error loading photo]", ln=True)
+                                pdf.cell(0, 6, txt=sanitize_text("[Error loading photo]"), ln=True)
                                 
                         pdf.ln(5)
-                        pdf.line(10, pdf.get_y(), 200, pdf.get_y()) # Separator line
+                        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
                         pdf.ln(5)
                     
-                    # FPDF outputs differently depending on version. This safely extracts bytes.
                     try:
                         return pdf.output(dest='S').encode('latin-1')
                     except Exception:
                         return bytes(pdf.output())
 
-                # 3. PDF Download Button
                 st.write("---")
                 pdf_bytes = generate_pdf(report_guests)
                 st.download_button(
@@ -235,18 +233,23 @@ if role == "Manager 👔":
 #           ON-GROUND TEAM UI
 # ==========================================
 elif role == "On-Ground Team 🏃":
-    st.subheader("📍 Active Guests")
 
     # --- NO-RERUN CALLBACKS (PREVENTS SCROLL JUMPING) ---
     def commit_save(g_id, g_name):
+        new_lounge = st.session_state[f"staff_l_{g_id}"]
         update_data = {
-            "lounge": st.session_state[f"staff_l_{g_id}"],
+            "lounge": new_lounge,
             "lmw_status": st.session_state[f"lmw_{g_id}"],
             "demo_status": st.session_state[f"demo_{g_id}"],
             "ready_to_meet_gurudev": st.session_state[f"ready_{g_id}"],
             "met_gurudev": st.session_state[f"guru_{g_id}"]
         }
         conn.table("guests").update(update_data).eq("id", g_id).execute()
+        
+        # Update the memory lock so the guest successfully migrates to their new lounge tab
+        if g_id in st.session_state.initial_lounges:
+            st.session_state.initial_lounges[g_id] = new_lounge
+            
         st.toast(f"✅ Saved updates for {g_name}!")
 
     def mark_complete(g_id, g_name):
@@ -271,7 +274,12 @@ elif role == "On-Ground Team 🏃":
             st.success("No active guests currently waiting. Take a breather! ☕")
             return
             
-        # --- 🔒 ANTI-RESHUFFLE & CUSTOM ROOM SORTING LOGIC 🔒 ---
+        # --- NEW UI: LOUNGE FILTER ---
+        st.subheader("📍 Lounge Filter")
+        selected_view = st.pills("Select your station", ["All", "L1", "L2", "L3", "BR", "L5"], default="All", key="lounge_tab_selector", label_visibility="collapsed")
+        st.write("---")
+
+        # --- 🔒 ANTI-RESHUFFLE LOGIC 🔒 ---
         if "initial_lounges" not in st.session_state:
             st.session_state.initial_lounges = {}
             
@@ -281,18 +289,29 @@ elif role == "On-Ground Team 🏃":
                 
         room_order = {"L1": 1, "L2": 2, "L3": 3, "BR": 4, "L5": 5}
         
-        # Sorts rigidly by initial room, then exactly by arrival time. Ensures ZERO shuffling.
         active_guests.sort(key=lambda g: (
             room_order.get(st.session_state.initial_lounges[g['id']], 99),
             g['created_at']
         ))
-        # --------------------------------------------------------
+        # ----------------------------------
 
-        search_query = st.text_input("🔍 Search Guest Name...", "", placeholder="Type a name to filter the list below...")
-        filtered_guests = [g for g in active_guests if search_query.lower() in g['guest_name'].lower()]
+        search_query = st.text_input("🔍 Search Guest Name...", "", placeholder="Type a name to filter...")
+
+        # --- APPLY THE LOUNGE & NAME FILTERS ---
+        filtered_guests = []
+        for g in active_guests:
+            matches_search = search_query.lower() in g['guest_name'].lower()
+            guest_current_lounge = g.get('lounge', 'L1')
+            matches_lounge = (selected_view == "All") or (guest_current_lounge == selected_view)
+            
+            if matches_search and matches_lounge:
+                filtered_guests.append(g)
 
         if not filtered_guests:
-            st.info("No guests match that name.")
+            if selected_view != "All" and not search_query:
+                st.info(f"No active guests currently in {selected_view}.")
+            else:
+                st.info("No guests match your filters.")
 
         for guest in filtered_guests:
             current_lounge = guest.get('lounge', 'L1')
@@ -331,7 +350,6 @@ elif role == "On-Ground Team 🏃":
                         else:
                             st.info("No photo captured.")
                         
-                        # On-Ground Photo feature with native callback 
                         new_pic = st.camera_input("Take Photo", key=f"staff_cam_{guest['id']}", label_visibility="collapsed")
                         if new_pic is not None:
                             st.button("💾 Save Photo", key=f"save_pic_{guest['id']}", use_container_width=True, on_click=commit_photo, args=(guest['id'], guest['guest_name']))
@@ -373,7 +391,6 @@ elif role == "On-Ground Team 🏃":
                 
                 btn_col1.link_button("📲 WhatsApp", wa_url, use_container_width=True)
                 
-                # Manual Save and Complete buttons now use Callbacks to eliminate scroll jumps
                 btn_col2.button("💾 Save Updates", use_container_width=True, key=f"save_btn_{guest['id']}", on_click=commit_save, args=(guest['id'], guest['guest_name']))
                 
                 btn_col3.button("✅ Complete", type="primary", use_container_width=True, key=f"jai_btn_{guest['id']}", on_click=mark_complete, args=(guest['id'], guest['guest_name']))
