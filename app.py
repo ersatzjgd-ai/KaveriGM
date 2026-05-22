@@ -76,7 +76,8 @@ if role == "Manager 👔":
                     with st.expander("📸 Capture Photo (Optional)", expanded=False):
                         pic = st.camera_input("Take Photo", key=f"cam_{guest['id']}", label_visibility="collapsed")
                     
-                    selected_lounge = st.pills("Assign Lounge", ["L1", "L2", "L3", "BR", "L5"], key=f"mgr_l_{guest['id']}", label_visibility="collapsed")
+                    # Added "Unassigned" to the Manager's check-in pills
+                    selected_lounge = st.pills("Assign Lounge", ["L1", "L2", "L3", "BR", "L5", "Unassigned"], key=f"mgr_l_{guest['id']}", label_visibility="collapsed")
                     
                     if selected_lounge:
                         update_data = {
@@ -88,7 +89,7 @@ if role == "Manager 👔":
                             update_data["photo_data"] = base64.b64encode(pic.getvalue()).decode()
                             
                         conn.table("guests").update(update_data).eq("id", guest['id']).execute()
-                        st.toast(f"{guest['guest_name']} sent to {selected_lounge}!")
+                        st.toast(f"{guest['guest_name']} checked in ({selected_lounge})!")
                         st.rerun()
 
         st.write("---") 
@@ -233,7 +234,6 @@ if role == "Manager 👔":
 #           ON-GROUND TEAM UI
 # ==========================================
 elif role == "On-Ground Team 🏃":
-    st.subheader("📍 Active Guests")
 
     # --- NO-RERUN CALLBACKS (PREVENTS SCROLL JUMPING) ---
     def commit_save(g_id, g_name):
@@ -275,8 +275,8 @@ elif role == "On-Ground Team 🏃":
             st.success("No active guests currently waiting. Take a breather! ☕")
             return
             
-        # --- UI: LOUNGE FILTER (Title Removed for space) ---
-        selected_view = st.pills("Select your station", ["All", "L1", "L2", "L3", "BR", "L5"], default="All", key="lounge_tab_selector", label_visibility="collapsed")
+        # --- UI: LOUNGE FILTER ---
+        selected_view = st.pills("Select your station", ["All", "Unassigned", "L1", "L2", "L3", "BR", "L5"], default="All", key="lounge_tab_selector", label_visibility="collapsed")
         st.write("---")
 
         # --- 🔒 ANTI-RESHUFFLE LOGIC 🔒 ---
@@ -285,9 +285,11 @@ elif role == "On-Ground Team 🏃":
             
         for g in active_guests:
             if g['id'] not in st.session_state.initial_lounges:
-                st.session_state.initial_lounges[g['id']] = g.get('lounge', 'L1')
+                # Fallback to "Unassigned" if the lounge value is empty/None
+                st.session_state.initial_lounges[g['id']] = g.get('lounge') or "Unassigned"
                 
-        room_order = {"L1": 1, "L2": 2, "L3": 3, "BR": 4, "L5": 5}
+        # Unassigned gets 0 priority so it floats to the very top of the "All" list
+        room_order = {"Unassigned": 0, "L1": 1, "L2": 2, "L3": 3, "BR": 4, "L5": 5}
         
         active_guests.sort(key=lambda g: (
             room_order.get(st.session_state.initial_lounges[g['id']], 99),
@@ -301,7 +303,7 @@ elif role == "On-Ground Team 🏃":
         filtered_guests = []
         for g in active_guests:
             matches_search = search_query.lower() in g['guest_name'].lower()
-            guest_current_lounge = g.get('lounge', 'L1')
+            guest_current_lounge = g.get('lounge') or "Unassigned"
             matches_lounge = (selected_view == "All") or (guest_current_lounge == selected_view)
             
             if matches_search and matches_lounge:
@@ -314,9 +316,10 @@ elif role == "On-Ground Team 🏃":
                 st.info("No guests match your filters.")
 
         for guest in filtered_guests:
-            current_lounge = guest.get('lounge', 'L1')
+            current_lounge = guest.get('lounge') or "Unassigned"
             
             color_map = {
+                "Unassigned": ("#FFDDC1", "#000000"), # Light orange/peach to grab attention
                 "L1": ("#00FFFF", "#000000"),
                 "L2": ("#FFFF00", "#000000"),
                 "L3": ("#FF00FF", "#FFFFFF"),
@@ -335,7 +338,7 @@ elif role == "On-Ground Team 🏃":
                 col_lounge, col_photo = st.columns([3, 1])
                 
                 with col_lounge:
-                    lounge_options = ["L1", "L2", "L3", "BR", "L5"]
+                    lounge_options = ["Unassigned", "L1", "L2", "L3", "BR", "L5"]
                     if current_lounge not in lounge_options:
                         lounge_options.insert(0, current_lounge)
                         
