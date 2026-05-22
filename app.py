@@ -76,7 +76,6 @@ if role == "Manager 👔":
                     with st.expander("📸 Capture Photo (Optional)", expanded=False):
                         pic = st.camera_input("Take Photo", key=f"cam_{guest['id']}", label_visibility="collapsed")
                     
-                    # Added "Unassigned" to the Manager's check-in pills
                     selected_lounge = st.pills("Assign Lounge", ["L1", "L2", "L3", "BR", "L5", "Unassigned"], key=f"mgr_l_{guest['id']}", label_visibility="collapsed")
                     
                     if selected_lounge:
@@ -247,7 +246,6 @@ elif role == "On-Ground Team 🏃":
         }
         conn.table("guests").update(update_data).eq("id", g_id).execute()
         
-        # Update the memory lock so the guest successfully migrates to their new lounge tab
         if g_id in st.session_state.initial_lounges:
             st.session_state.initial_lounges[g_id] = new_lounge
             
@@ -285,21 +283,17 @@ elif role == "On-Ground Team 🏃":
             
         for g in active_guests:
             if g['id'] not in st.session_state.initial_lounges:
-                # Fallback to "Unassigned" if the lounge value is empty/None
                 st.session_state.initial_lounges[g['id']] = g.get('lounge') or "Unassigned"
                 
-        # Unassigned gets 0 priority so it floats to the very top of the "All" list
         room_order = {"Unassigned": 0, "L1": 1, "L2": 2, "L3": 3, "BR": 4, "L5": 5}
         
         active_guests.sort(key=lambda g: (
             room_order.get(st.session_state.initial_lounges[g['id']], 99),
             g['created_at']
         ))
-        # ----------------------------------
 
         search_query = st.text_input("🔍 Search Guest Name...", "", placeholder="Type a name to filter...")
 
-        # --- APPLY THE LOUNGE & NAME FILTERS ---
         filtered_guests = []
         for g in active_guests:
             matches_search = search_query.lower() in g['guest_name'].lower()
@@ -319,7 +313,7 @@ elif role == "On-Ground Team 🏃":
             current_lounge = guest.get('lounge') or "Unassigned"
             
             color_map = {
-                "Unassigned": ("#FFDDC1", "#000000"), # Light orange/peach to grab attention
+                "Unassigned": ("#FFDDC1", "#000000"), 
                 "L1": ("#00FFFF", "#000000"),
                 "L2": ("#FFFF00", "#000000"),
                 "L3": ("#FF00FF", "#FFFFFF"),
@@ -329,21 +323,20 @@ elif role == "On-Ground Team 🏃":
             bg_color, text_color = color_map.get(current_lounge, ("#E0E0E0", "#000000"))
 
             with st.container(border=True):
+                # Extra-squeezed name card (padding reduced from 8px to 4px)
                 st.markdown(
-                    f'<div style="background-color: {bg_color}; color: {text_color}; padding: 8px; border-radius: 5px; text-align: center; font-weight: bold; margin-bottom: 10px; font-size: 18px;">'
+                    f'<div style="background-color: {bg_color}; color: {text_color}; padding: 4px; border-radius: 4px; text-align: center; font-weight: bold; margin-bottom: 5px; font-size: 16px;">'
                     f'👤 {guest["guest_name"]}</div>', 
                     unsafe_allow_html=True
                 )
                 
+                # --- Row 1: Lounge Dropdown & Photo Popover ---
                 col_lounge, col_photo = st.columns([3, 1])
-                
                 with col_lounge:
                     lounge_options = ["Unassigned", "L1", "L2", "L3", "BR", "L5"]
                     if current_lounge not in lounge_options:
                         lounge_options.insert(0, current_lounge)
-                        
                     st.selectbox("Update Lounge:", options=lounge_options, index=lounge_options.index(current_lounge), key=f"staff_l_{guest['id']}", label_visibility="collapsed")
-
                 with col_photo:
                     with st.popover("📸", use_container_width=True):
                         photo_b64 = guest.get('photo_data')
@@ -357,19 +350,21 @@ elif role == "On-Ground Team 🏃":
                         if new_pic is not None:
                             st.button("💾 Save Photo", key=f"save_pic_{guest['id']}", use_container_width=True, on_click=commit_photo, args=(guest['id'], guest['guest_name']))
 
-                # --- 3-STATE SEGMENTED CONTROLS ---
+                # --- Row 2: Squeezed Horizontal Segmented Controls ---
+                # (Captions removed. Labels built directly into the widget to save height)
                 c1, c2 = st.columns(2)
                 with c1:
-                    st.caption("📺 LMW")
-                    st.segmented_control("LMW", ["Not yet", "Started", "Done"], default=guest.get('lmw_status', 'Not yet'), key=f"lmw_{guest['id']}", label_visibility="collapsed")
+                    st.segmented_control("📺 LMW", ["Not yet", "Started", "Done"], default=guest.get('lmw_status', 'Not yet'), key=f"lmw_{guest['id']}", label_visibility="visible")
                 with c2:
-                    st.caption("💻 IP Demo")
-                    st.segmented_control("Demo", ["Not yet", "Started", "Done"], default=guest.get('demo_status', 'Not yet'), key=f"demo_{guest['id']}", label_visibility="collapsed")
+                    st.segmented_control("💻 IP Demo", ["Not yet", "Started", "Done"], default=guest.get('demo_status', 'Not yet'), key=f"demo_{guest['id']}", label_visibility="visible")
 
-                # --- STANDARD TOGGLES ---
+                # --- Row 3: Squeezed Toggles ---
+                # (Properly indented under columns to force them horizontally next to each other)
                 c3, c4 = st.columns(2)
-                st.toggle("⏳ Ready for Vyas", value=guest.get('ready_to_meet_gurudev', False), key=f"ready_{guest['id']}")
-                st.toggle("🤝 Met Gurudev", value=guest.get('met_gurudev', False), key=f"guru_{guest['id']}")
+                with c3:
+                    st.toggle("⏳ Ready for Vyas", value=guest.get('ready_to_meet_gurudev', False), key=f"ready_{guest['id']}")
+                with c4:
+                    st.toggle("🤝 Met Gurudev", value=guest.get('met_gurudev', False), key=f"guru_{guest['id']}")
 
                 # --- INSTANT WHATSAPP LINK ---
                 local_lounge = st.session_state.get(f"staff_l_{guest['id']}", current_lounge)
@@ -393,9 +388,7 @@ elif role == "On-Ground Team 🏃":
                 btn_col1, btn_col2, btn_col3 = st.columns(3)
                 
                 btn_col1.link_button("📲 WhatsApp", wa_url, use_container_width=True)
-                
                 btn_col2.button("💾 Save Updates", use_container_width=True, key=f"save_btn_{guest['id']}", on_click=commit_save, args=(guest['id'], guest['guest_name']))
-                
                 btn_col3.button("✅ Complete", type="primary", use_container_width=True, key=f"jai_btn_{guest['id']}", on_click=mark_complete, args=(guest['id'], guest['guest_name']))
 
     team_dashboard()
