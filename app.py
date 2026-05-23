@@ -29,6 +29,8 @@ if "manager_logged_in" not in st.session_state:
 #         TELEGRAM INTEGRATION ALERT
 # ==========================================
 def alert_telegram_team(guest_id, guest_name, photo_bytes=None):
+    st.error(f"Keys Streamlit can see right now: {list(st.secrets.keys())}")
+    
     telegram_token = st.secrets.get("TELEGRAM_BOT_TOKEN")
     group_id = st.secrets.get("TELEGRAM_GROUP_ID")
     
