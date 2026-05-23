@@ -16,7 +16,7 @@ def generate_guest_keyboard(guest):
     markup = InlineKeyboardMarkup(row_width=3)
     g_id = guest['id']
     
-    # State 1: Unassigned Lounge
+    # STATE 1: Unassigned (The Dispatch Screen)
     if not guest.get('lounge') or guest.get('lounge') == 'Unassigned':
         markup.add(
             InlineKeyboardButton("L1", callback_data=f"lng:{g_id}:L1"),
@@ -27,8 +27,7 @@ def generate_guest_keyboard(guest):
         )
         return markup
 
-    # State 2: Assigned & Active (The Workflow Toggles)
-    # Cycle states: Not yet -> Started -> Done -> Not yet
+    # STATE 2: Claimed & Active (The Workflow Toggles)
     lmw_states = {"Not yet": "Started", "Started": "Done", "Done": "Not yet"}
     demo_states = {"Not yet": "Started", "Started": "Done", "Done": "Not yet"}
     
@@ -53,8 +52,13 @@ def generate_guest_keyboard(guest):
 
 # --- MESSAGE TEXT GENERATOR ---
 def generate_guest_text(guest, updated_by=None):
-    text = f"👤 *{guest['guest_name']}*\n"
-    text += f"📍 Lounge: *{guest.get('lounge', 'Unassigned')}*\n\n"
+    # Text for Unassigned Guests
+    if not guest.get('lounge') or guest.get('lounge') == 'Unassigned':
+        return f"🚨 *New Arrival*\n👤 *{guest['guest_name']}*\n📍 Lounge: *Unassigned*\n\n👇 *Please claim and assign a lounge:*"
+    
+    # Text for Claimed Guests
+    text = f"✅ *Claimed & Assigned to {guest.get('lounge')}*\n"
+    text += f"👤 *{guest['guest_name']}*\n\n"
     text += f"📺 LMW: {guest.get('lmw_status', 'Not yet')}\n"
     text += f"💻 IP Demo: {guest.get('demo_status', 'Not yet')}\n"
     text += f"⏳ Ready for Vyas: {'✅' if guest.get('ready_to_meet_gurudev') else '❌'}\n"
@@ -62,6 +66,7 @@ def generate_guest_text(guest, updated_by=None):
     
     if updated_by:
         text += f"\n_Last updated by @{updated_by}_"
+        
     return text
 
 # --- CALLBACK HANDLER ---
@@ -71,14 +76,25 @@ def handle_callback(call):
     action, g_id, value = call.data.split(':')
     user_name = call.from_user.username or call.from_user.first_name
     
-    # 1. Fetch current guest state
+    # 1. Fetch current guest state from Supabase
     res = supabase.table("guests").select("*").eq("id", g_id).execute()
     if not res.data:
-        bot.answer_callback_query(call.id, "Guest not found in database.")
+        bot.answer_callback_query(call.id, "Guest not found in database.", show_alert=True)
         return
     guest = res.data[0]
 
-    # 2. Determine Update Payload
+    # --- 2. RACE CONDITION PREVENTION ---
+    # If someone tries to claim a lounge, but it's already claimed in the database
+    if action == "lng" and guest.get('lounge') and guest.get('lounge') != "Unassigned":
+        bot.answer_callback_query(call.id, "⚠️ Too late! Already claimed.", show_alert=True)
+        
+        # Force their message to update to the claimed state so the buttons disappear
+        new_text = generate_guest_text(guest)
+        new_markup = generate_guest_keyboard(guest)
+        bot.edit_message_caption(caption=new_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=new_markup)
+        return
+
+    # 3. Determine Update Payload
     update_data = {}
     if action == "lng":
         update_data = {"lounge": value}
@@ -93,22 +109,26 @@ def handle_callback(call):
     elif action == "cmp":
         update_data = {"jai_gurudev": True}
 
-    # 3. Update Supabase
+    # 4. Update Supabase
     updated_res = supabase.table("guests").update(update_data).eq("id", g_id).execute()
     updated_guest = updated_res.data[0]
 
-    # 4. Update Telegram Message
+    # 5. Update Telegram Message In-Place
     if action == "cmp":
-        # Final state: remove buttons entirely
-        final_text = f"🏁 *{updated_guest['guest_name']} - Visit Complete*\n_Handled by @{user_name}_"
+        # Final state: remove all buttons entirely to lock the record
+        final_text = f"🏁 *{updated_guest['guest_name']} - Visit Complete*\n_Finalized by @{user_name}_"
         bot.edit_message_caption(caption=final_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=None)
         bot.answer_callback_query(call.id, "Visit Completed!")
     else:
-        # Mid-workflow state: update text and buttons
+        # Mid-workflow state: update text and toggle the buttons
         new_text = generate_guest_text(updated_guest, updated_by=user_name)
         new_markup = generate_guest_keyboard(updated_guest)
         bot.edit_message_caption(caption=new_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=new_markup)
-        bot.answer_callback_query(call.id, "Status Updated!")
+        
+        if action == "lng":
+            bot.answer_callback_query(call.id, f"Successfully claimed for {value}!")
+        else:
+            bot.answer_callback_query(call.id, "Status Updated!")
 
 print("🤖 Bot is running and listening for button clicks...")
 bot.infinity_polling()
