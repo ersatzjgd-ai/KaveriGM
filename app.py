@@ -145,7 +145,7 @@ if role == "Manager 👔":
                         alert_telegram_team(guest['id'], guest['guest_name'], pic.getvalue() if pic is not None else None)
                         
                         st.toast(f"{guest['guest_name']} checked in ({selected_lounge})!")
-                        st.rerun()
+                        #st.rerun()
 
         st.write("---") 
 
