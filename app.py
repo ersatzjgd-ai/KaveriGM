@@ -61,13 +61,18 @@ def alert_telegram_team(guest_id, guest_name, photo_bytes=None):
     try:
         if photo_bytes:
             files = {"photo": ("photo.jpg", photo_bytes, "image/jpeg")}
-            requests.post(url, data=data, files=files)
+            res = requests.post(url, data=data, files=files)
         else:
             msg_url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
             data["text"] = data.pop("caption")
-            requests.post(msg_url, json=data)
+            res = requests.post(msg_url, json=data)
+            
+        # This will force Streamlit to show the exact Telegram error on the screen
+        if res.status_code != 200:
+            st.error(f"Telegram API Error: {res.text}")
+            
     except Exception as e:
-        print(f"Failed to send Telegram alert: {e}")
+        st.error(f"Failed to send Telegram alert: {e}")
 
 # --- UI: ROLE SELECTOR ---
 st.title("🏛️ Kaveri GM")
