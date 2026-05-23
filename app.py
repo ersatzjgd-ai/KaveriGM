@@ -6,6 +6,8 @@ from datetime import datetime
 import tempfile
 import os
 from fpdf import FPDF
+import requests
+import json
 
 # --- CONFIG ---
 st.set_page_config(page_title="Kaveri Guest Manager", layout="centered", initial_sidebar_state="collapsed")
@@ -23,13 +25,57 @@ if "manager_logged_in" not in st.session_state:
     else:
         st.session_state.manager_logged_in = False
 
+# ==========================================
+#         TELEGRAM INTEGRATION ALERT
+# ==========================================
+def alert_telegram_team(guest_id, guest_name, photo_bytes=None):
+    # Uses .get() so the app doesn't crash if secrets aren't added yet
+    telegram_token = st.secrets.get("TELEGRAM_BOT_TOKEN")
+    group_id = st.secrets.get("TELEGRAM_GROUP_ID")
+    
+    if not telegram_token or not group_id:
+        print("Telegram credentials missing in secrets. Skipping Telegram alert.")
+        return
+
+    url = f"https://api.telegram.org/bot{telegram_token}/sendPhoto"
+    
+    caption = f"🚨 *New Arrival*\n👤 *{guest_name}*\n📍 Lounge: *Unassigned*\n\nPlease assign a lounge:"
+    
+    reply_markup = {
+        "inline_keyboard": [[
+            {"text": "L1", "callback_data": f"lng:{guest_id}:L1"},
+            {"text": "L2", "callback_data": f"lng:{guest_id}:L2"},
+            {"text": "L3", "callback_data": f"lng:{guest_id}:L3"},
+            {"text": "BR", "callback_data": f"lng:{guest_id}:BR"},
+            {"text": "L5", "callback_data": f"lng:{guest_id}:L5"}
+        ]]
+    }
+
+    data = {
+        "chat_id": group_id,
+        "caption": caption,
+        "parse_mode": "Markdown",
+        "reply_markup": json.dumps(reply_markup)
+    }
+
+    try:
+        if photo_bytes:
+            files = {"photo": ("photo.jpg", photo_bytes, "image/jpeg")}
+            requests.post(url, data=data, files=files)
+        else:
+            msg_url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
+            data["text"] = data.pop("caption")
+            requests.post(msg_url, json=data)
+    except Exception as e:
+        print(f"Failed to send Telegram alert: {e}")
+
 # --- UI: ROLE SELECTOR ---
 st.title("🏛️ Kaveri GM")
 role = st.segmented_control("Select Role", ["On-Ground Team 🏃", "Manager 👔"], default="On-Ground Team 🏃")
 st.divider()
 
 # ==========================================
-#              MANAGER UI
+#            MANAGER UI
 # ==========================================
 if role == "Manager 👔":
     
@@ -87,7 +133,12 @@ if role == "Manager 👔":
                         if pic is not None:
                             update_data["photo_data"] = base64.b64encode(pic.getvalue()).decode()
                             
+                        # 1. Update Database
                         conn.table("guests").update(update_data).eq("id", guest['id']).execute()
+                        
+                        # 2. Trigger Telegram Alert
+                        alert_telegram_team(guest['id'], guest['guest_name'], pic.getvalue() if pic is not None else None)
+                        
                         st.toast(f"{guest['guest_name']} checked in ({selected_lounge})!")
                         st.rerun()
 
