@@ -137,4 +137,4 @@ def handle_callback(call):
 print("🤖 Clearing ghost instances...")
 bot.remove_webhook() # This violently kills any ghost connections
 print("🤖 Bot is running and listening for button clicks...")
-bot.infinity_polling()
+bot.infinity_polling(skip_pending=True)
