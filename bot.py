@@ -89,7 +89,14 @@ def generate_guest_text(guest, updated_by=None):
         text += f"\n_Last updated by @{updated_by}_"
         
     return text
-
+# --- SMART EDIT HELPER ---
+def update_tg_message(call, new_text, new_markup):
+    # If the message is just text (no photo)
+    if call.message.content_type == 'text':
+        bot.edit_message_text(text=new_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=new_markup)
+    # If the message has a photo (uses a caption)
+    else:
+        bot.edit_message_caption(caption=new_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=new_markup)
 # --- CALLBACK HANDLER ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
