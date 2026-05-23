@@ -29,12 +29,12 @@ if "manager_logged_in" not in st.session_state:
 #         TELEGRAM INTEGRATION ALERT
 # ==========================================
 def alert_telegram_team(guest_id, guest_name, photo_bytes=None):
-    # Uses .get() so the app doesn't crash if secrets aren't added yet
     telegram_token = st.secrets.get("TELEGRAM_BOT_TOKEN")
     group_id = st.secrets.get("TELEGRAM_GROUP_ID")
     
+    # Change it to st.error so it shows on your screen!
     if not telegram_token or not group_id:
-        print("Telegram credentials missing in secrets. Skipping Telegram alert.")
+        st.error("🚨 Missing Telegram Secrets! Check Streamlit Cloud Settings.")
         return
 
     url = f"https://api.telegram.org/bot{telegram_token}/sendPhoto"
