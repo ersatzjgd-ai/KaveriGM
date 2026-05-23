@@ -3,3 +3,4 @@ requests
 supabase
 st-supabase-connection
 fpdf
+pyTelegramBotAPI
