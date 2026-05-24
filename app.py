@@ -29,15 +29,12 @@ if "manager_logged_in" not in st.session_state:
 #         TELEGRAM INTEGRATION ALERT
 # ==========================================
 def alert_telegram_team(guest_id, guest_name, photo_bytes=None):
-    st.error(f"Keys Streamlit can see right now: {list(st.secrets.keys())}")
-    
     telegram_token = st.secrets.get("TELEGRAM_BOT_TOKEN")
     group_id = st.secrets.get("TELEGRAM_GROUP_ID")
     
-    # Change it to st.error so it shows on your screen!
     if not telegram_token or not group_id:
         st.error("🚨 Missing Telegram Secrets! Check Streamlit Cloud Settings.")
-        return
+        st.stop()
 
     url = f"https://api.telegram.org/bot{telegram_token}/sendPhoto"
     
@@ -60,6 +57,7 @@ def alert_telegram_team(guest_id, guest_name, photo_bytes=None):
         "reply_markup": json.dumps(reply_markup)
     }
 
+    # --- STRICT ERROR CHECKING BLOCK ---
     try:
         if photo_bytes:
             files = {"photo": ("photo.jpg", photo_bytes, "image/jpeg")}
@@ -69,12 +67,15 @@ def alert_telegram_team(guest_id, guest_name, photo_bytes=None):
             data["text"] = data.pop("caption")
             res = requests.post(msg_url, json=data)
             
-        # This will force Streamlit to show the exact Telegram error on the screen
-        if res.status_code != 200:
-            st.error(f"Telegram API Error: {res.text}")
+        # Force Streamlit to show the exact error if Telegram rejects it
+        if not res.ok:
+            st.error(f"🚨 Telegram rejected the message! Error: {res.status_code}")
+            st.json(res.json()) # This will print the exact reason (e.g., rate limit, bad request)
+            st.stop() # Freeze the app here so the manager sees the error
             
     except Exception as e:
-        st.error(f"Failed to send Telegram alert: {e}")
+        st.error(f"🚨 Network Error: Could not reach Telegram. {e}")
+        st.stop()
 
 # --- UI: ROLE SELECTOR ---
 st.title("🏛️ Kaveri GM")
@@ -147,7 +148,7 @@ if role == "Manager 👔":
                         alert_telegram_team(guest['id'], guest['guest_name'], pic.getvalue() if pic is not None else None)
                         
                         st.toast(f"{guest['guest_name']} checked in ({selected_lounge})!")
-                        #st.rerun()
+                        st.rerun()
 
         st.write("---") 
 
@@ -288,7 +289,7 @@ if role == "Manager 👔":
 
 
 # ==========================================
-#           ON-GROUND TEAM UI
+#            ON-GROUND TEAM UI
 # ==========================================
 elif role == "On-Ground Team 🏃":
 
