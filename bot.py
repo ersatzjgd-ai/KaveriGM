@@ -5,19 +5,21 @@ from supabase import create_client, Client
 
 # --- CONFIG ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_GROUP_ID = os.getenv("TELEGRAM_GROUP_ID") # NEW: Needed for reassignment
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- KEYBOARD GENERATOR (With Pagination) ---
+# --- KEYBOARD GENERATOR ---
 def generate_guest_keyboard(guest, page="main"):
     markup = InlineKeyboardMarkup(row_width=3)
     g_id = guest['id']
+    lounge = str(guest.get('lounge', ''))
     
-    # Unassigned State
-    if not guest.get('lounge') or guest.get('lounge') == 'Unassigned':
+    # STATE: Unassigned or Pending Reassignment (Shows Dispatch Buttons)
+    if not lounge or lounge == 'Unassigned' or lounge.startswith('Pending'):
         markup.add(
             InlineKeyboardButton("L1", callback_data=f"lng:{g_id}:L1"),
             InlineKeyboardButton("L2", callback_data=f"lng:{g_id}:L2"),
@@ -48,7 +50,6 @@ def generate_guest_keyboard(guest, page="main"):
             InlineKeyboardButton(guru_text, callback_data=f"gur:{g_id}:toggle")
         )
         
-        # More Options Button
         markup.add(InlineKeyboardButton("⚙️ More Options", callback_data=f"pag:{g_id}:opt"))
         markup.add(InlineKeyboardButton("🏁 Complete Visit", callback_data=f"cmp:{g_id}:done"))
 
@@ -75,11 +76,18 @@ def generate_guest_keyboard(guest, page="main"):
 
 # --- MESSAGE TEXT GENERATOR ---
 def generate_guest_text(guest, updated_by=None):
-    if not guest.get('lounge') or guest.get('lounge') == 'Unassigned':
+    lounge = str(guest.get('lounge', ''))
+    
+    if not lounge or lounge == 'Unassigned':
         return f"🚨 *New Arrival*\n👤 *{guest['guest_name']}*\n📍 Lounge: *Unassigned*\n\n👇 *Please claim and assign a lounge:*"
+        
+    # NEW: Reassignment Text
+    if lounge.startswith('Pending'):
+        target = lounge.replace('Pending ', '')
+        return f"🚨 *Room Reassignment!*\n👤 *{guest['guest_name']}*\n👉 Transferring to: *{target}*\n\n👇 *New team member, please claim below:*"
     
     # Clean Title Update
-    text = f"*{guest.get('lounge')}*\n"
+    text = f"*{lounge}*\n"
     text += f"👤 *{guest['guest_name']}*\n\n"
     text += f"📺 LMW: {guest.get('lmw_status', 'Not yet')}\n"
     text += f"💻 IP Demo: {guest.get('demo_status', 'Not yet')}\n"
@@ -170,7 +178,8 @@ def handle_callback(call):
         return
 
     # Race condition check for initial assignment
-    if action == "lng" and guest.get('lounge') and guest.get('lounge') != "Unassigned":
+    lounge = str(guest.get('lounge', ''))
+    if action == "lng" and lounge and lounge != "Unassigned" and not lounge.startswith('Pending'):
         bot.answer_callback_query(call.id, "⚠️ Too late! Already claimed.", show_alert=True)
         new_text = generate_guest_text(guest)
         new_markup = generate_guest_keyboard(guest)
@@ -179,7 +188,8 @@ def handle_callback(call):
 
     # Determine Update Payload
     update_data = {}
-    if action == "lng" or action == "trn": update_data = {"lounge": value} 
+    if action == "lng": update_data = {"lounge": value} 
+    elif action == "trn": update_data = {"lounge": f"Pending {value}"} # Sets to pending so it shows dispatch buttons
     elif action == "lmw": update_data = {"lmw_status": value}
     elif action == "dmo": update_data = {"demo_status": value}
     elif action == "rdy": update_data = {"ready_to_meet_gurudev": not guest.get('ready_to_meet_gurudev', False)}
@@ -197,6 +207,24 @@ def handle_callback(call):
         try: bot.answer_callback_query(call.id, "Visit Completed!")
         except: pass
         
+    elif action == "trn":
+        # --- REASSIGNMENT FLOW ---
+        # 1. Close out the DM for the previous owner
+        dm_receipt = f"🔄 *Transfer Initiated*\n👤 *{updated_guest['guest_name']}*\n_This guest was sent back to the group for reassignment to {value}._"
+        update_tg_message(call, dm_receipt, None)
+        
+        # 2. Send the Reassignment message to the Main Group
+        if TELEGRAM_GROUP_ID:
+            new_text = generate_guest_text(updated_guest)
+            new_markup = generate_guest_keyboard(updated_guest, page="main")
+            try:
+                bot.send_message(chat_id=TELEGRAM_GROUP_ID, text=new_text, reply_markup=new_markup, parse_mode="Markdown")
+            except Exception as e:
+                print(f"Failed to send reassignment to group: {e}")
+                
+        try: bot.answer_callback_query(call.id, f"Transferred to {value}!")
+        except: pass
+
     elif action == "lng":
         # --- THE DM FORK (When a lounge is claimed) ---
         dm_text = generate_guest_text(updated_guest, updated_by=user_name)
