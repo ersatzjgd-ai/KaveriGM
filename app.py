@@ -38,7 +38,11 @@ def alert_telegram_team(guest_id, guest_name, photo_bytes=None):
 
     url = f"https://api.telegram.org/bot{telegram_token}/sendPhoto"
     
-    caption = f"🚨 *New Arrival*\n👤 *{guest_name}*\n📍 Lounge: *Unassigned*\n\nPlease assign a lounge:"
+    # ⚡ FIX 1: Sanitize the name just in case they used HTML brackets in their name
+    safe_name = str(guest_name).replace('<', '').replace('>', '')
+    
+    # ⚡ FIX 2: Use HTML tags (<b>) instead of Markdown asterisks (*)
+    caption = f"🚨 <b>New Arrival</b>\n👤 <b>{safe_name}</b>\n📍 Lounge: <b>Unassigned</b>\n\nPlease assign a lounge:"
     
     reply_markup = {
         "inline_keyboard": [[
@@ -53,7 +57,7 @@ def alert_telegram_team(guest_id, guest_name, photo_bytes=None):
     data = {
         "chat_id": group_id,
         "caption": caption,
-        "parse_mode": "Markdown",
+        "parse_mode": "HTML", # ⚡ FIX 3: Changed to HTML!
         "reply_markup": json.dumps(reply_markup)
     }
 
@@ -69,9 +73,9 @@ def alert_telegram_team(guest_id, guest_name, photo_bytes=None):
             
         # Force Streamlit to show the exact error if Telegram rejects it
         if not res.ok:
-            st.error(f"🚨 Telegram rejected the message! Error: {res.status_code}")
-            st.json(res.json()) # This will print the exact reason (e.g., rate limit, bad request)
-            st.stop() # Freeze the app here so the manager sees the error
+            st.error(f"🚨 Telegram rejected {safe_name}! Error: {res.status_code}")
+            st.json(res.json()) 
+            st.stop() 
             
     except Exception as e:
         st.error(f"🚨 Network Error: Could not reach Telegram. {e}")
