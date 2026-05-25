@@ -14,6 +14,12 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# ==========================================
+#      MEMORY TRACKERS (Reminders & Live Receipts)
+# ==========================================
+reminders_tracker = {}
+group_msg_tracker = {} # NEW: Tracks the group message ID to update it live from DMs!
+
 # --- KEYBOARD GENERATOR ---
 def generate_guest_keyboard(guest, page="main"):
     markup = InlineKeyboardMarkup(row_width=3)
@@ -108,6 +114,33 @@ def update_tg_message(call, new_text, new_markup):
     else:
         bot.edit_message_caption(caption=new_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=new_markup)
 
+# --- NEW: LIVE GROUP RECEIPT SYNKER ---
+def update_group_live_receipt(g_id, guest, user_name):
+    """Edits the main group chat message to mirror DM progress without buttons."""
+    if g_id in group_msg_tracker and TELEGRAM_GROUP_ID:
+        msg_info = group_msg_tracker[g_id]
+        
+        # Build the exact same card, but add the locked indicator
+        if guest.get('jai_gurudev'):
+            text = f"🏁 *{guest['guest_name']} - Visit Complete*\n_Finalized by @{user_name}_"
+        else:
+            text = f"*{guest.get('lounge', 'Unassigned')}*\n"
+            text += f"👤 *{guest['guest_name']}*\n\n"
+            text += f"📺 LMW: {guest.get('lmw_status', 'Not yet')}\n"
+            text += f"💻 IP Demo: {guest.get('demo_status', 'Not yet')}\n"
+            text += f"⏳ Ready for Vyas: {'✅' if guest.get('ready_to_meet_gurudev') else '❌'}\n"
+            text += f"🤝 Met Gurudev: {'✅' if guest.get('met_gurudev') else '❌'}\n\n"
+            text += f"_🔒 Managed in DMs by @{user_name}_"
+            
+        try:
+            # Edit the correct field (text vs caption) based on original message type
+            if msg_info['is_photo']:
+                bot.edit_message_caption(caption=text, chat_id=TELEGRAM_GROUP_ID, message_id=msg_info['msg_id'], parse_mode="Markdown", reply_markup=None)
+            else:
+                bot.edit_message_text(text=text, chat_id=TELEGRAM_GROUP_ID, message_id=msg_info['msg_id'], parse_mode="Markdown", reply_markup=None)
+        except Exception:
+            pass # Fails safely if telegram rejects an identical update
+
 # ==========================================
 #      PHOTO REPLY HANDLER
 # ==========================================
@@ -151,8 +184,6 @@ def handle_photo_reply(message):
 # ==========================================
 #      BACKGROUND REMINDER LOOP
 # ==========================================
-reminders_tracker = {}
-
 def reminder_loop():
     while True:
         time.sleep(60) 
@@ -252,6 +283,11 @@ def handle_callback(call):
     if action == "cmp":
         final_text = f"🏁 *{updated_guest['guest_name']} - Visit Complete*\n_Finalized by @{user_name}_"
         update_tg_message(call, final_text, None)
+        
+        # ⚡️ UPDATE GROUP CHAT & CLEANUP
+        update_group_live_receipt(g_id, updated_guest, user_name)
+        if g_id in group_msg_tracker: del group_msg_tracker[g_id]
+        
         try: bot.answer_callback_query(call.id, "Visit Completed!")
         except: pass
         
@@ -260,16 +296,21 @@ def handle_callback(call):
         dm_receipt = f"🔄 *Transfer Initiated*\n👤 *{updated_guest['guest_name']}*\n_This guest was sent back to the group for reassignment to {value}._"
         update_tg_message(call, dm_receipt, None)
         
+        # ⚡️ Delete the old Live Receipt from the group so we don't have duplicate tracking cards!
+        if g_id in group_msg_tracker and TELEGRAM_GROUP_ID:
+            try: bot.delete_message(TELEGRAM_GROUP_ID, group_msg_tracker[g_id]['msg_id'])
+            except: pass
+            del group_msg_tracker[g_id]
+        
         if TELEGRAM_GROUP_ID:
             new_text = generate_guest_text(updated_guest)
             new_markup = generate_guest_keyboard(updated_guest, page="main")
             try:
-                # ⚡️ PHOTO BUG FIX: Carry the photo into the Main Group
                 if call.message.content_type == 'photo':
                     bot.send_photo(chat_id=TELEGRAM_GROUP_ID, photo=call.message.photo[-1].file_id, caption=new_text, reply_markup=new_markup, parse_mode="Markdown")
                 else:
                     bot.send_message(chat_id=TELEGRAM_GROUP_ID, text=new_text, reply_markup=new_markup, parse_mode="Markdown")
-            except Exception as e:
+            except Exception:
                 pass
                 
         try: bot.answer_callback_query(call.id, f"Transferred to {value}!")
@@ -281,7 +322,6 @@ def handle_callback(call):
         dm_markup = generate_guest_keyboard(updated_guest, page="main")
         
         try:
-            # ⚡️ PHOTO BUG FIX: Carry the photo into the DM
             if call.message.content_type == 'photo':
                 bot.send_photo(call.from_user.id, photo=call.message.photo[-1].file_id, caption=dm_text, reply_markup=dm_markup, parse_mode="Markdown")
             else:
@@ -291,15 +331,23 @@ def handle_callback(call):
             supabase.table("guests").update({"lounge": "Unassigned"}).eq("id", g_id).execute()
             return
             
-        group_receipt = f"*{value}*\n👤 *{updated_guest['guest_name']}*\n\n_Management moved to DMs by @{user_name}_"
-        update_tg_message(call, group_receipt, None)
+        # ⚡️ LOCK THE GROUP MESSAGE & SYNC IT LIVE
+        group_msg_tracker[g_id] = {
+            "msg_id": call.message.message_id,
+            "is_photo": call.message.content_type == 'photo'
+        }
+        update_group_live_receipt(g_id, updated_guest, user_name)
+        
         bot.answer_callback_query(call.id, "Check your DMs to manage this guest!")
         
     else:
-        # --- NORMAL UPDATES ---
+        # --- NORMAL UPDATES (Inside the DM) ---
         new_text = generate_guest_text(updated_guest, updated_by=user_name)
         new_markup = generate_guest_keyboard(updated_guest, page="main") 
         update_tg_message(call, new_text, new_markup)
+        
+        # ⚡️ INSTANTLY PUSH UPDATE TO THE MAIN GROUP CHAT
+        update_group_live_receipt(g_id, updated_guest, user_name)
 
 print("🤖 Bot is running and listening for button clicks...")
 bot.infinity_polling(skip_pending=True)
