@@ -2,7 +2,8 @@ import os
 import time
 import threading
 import urllib.parse
-import base64  # NEW: Needed to decode the photo for reminders!
+import base64
+from datetime import datetime, timezone
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from supabase import create_client, Client
@@ -223,10 +224,24 @@ def reminder_loop():
                                 except Exception:
                                     pass
                             
-                            # 2. 📸 SEND THE NEW REMINDER (WITH PHOTO)
+                            # 2. 🧮 CALCULATE TOTAL WAIT TIME
+                            minutes_waiting = "3+"
+                            try:
+                                created_str = guest.get('created_at', '')
+                                if created_str:
+                                    # Handle Supabase ISO timestamp format
+                                    created_str = created_str.replace('Z', '+00:00')
+                                    created_time = datetime.fromisoformat(created_str)
+                                    now = datetime.now(timezone.utc)
+                                    delta = now - created_time
+                                    minutes_waiting = int(delta.total_seconds() / 60)
+                            except Exception:
+                                pass # Fails safely back to "3+" if parsing fails
+
+                            # 3. 📸 SEND THE NEW REMINDER (WITH DYNAMIC TIME & PHOTO)
                             if TELEGRAM_GROUP_ID:
                                 base_text = generate_guest_text(guest)
-                                reminder_text = f"⏰ *REMINDER: WAITING 3+ MINS!*\n\n{base_text}"
+                                reminder_text = f"⏰ *REMINDER: WAITING {minutes_waiting} MINS!*\n\n{base_text}"
                                 markup = generate_guest_keyboard(guest, page="main")
                                 
                                 new_msg_id = None
@@ -367,12 +382,10 @@ def handle_callback(call):
         # ⚡️ CLEANUP CHECK: If they claim the guest, delete any floating reminder message!
         if g_id in reminders_tracker:
             reminder_msg_id = reminders_tracker[g_id].get('msg_id')
-            # Only delete the reminder if they didn't just click it (to prevent error crashes)
             if reminder_msg_id and reminder_msg_id != call.message.message_id:
                 if TELEGRAM_GROUP_ID:
                     try: bot.delete_message(TELEGRAM_GROUP_ID, reminder_msg_id)
                     except: pass
-            # Nullify the tracker ID so the background loop doesn't accidentally delete the Live Receipt!
             reminders_tracker[g_id]['msg_id'] = None
 
         # --- THE DM FORK ---
@@ -381,7 +394,7 @@ def handle_callback(call):
         
         try:
             if call.message.content_type == 'photo':
-                bot.send_photo(call.fromuser.id, photo=call.message.photo[-1].file_id, caption=dm_text, reply_markup=dm_markup, parse_mode="Markdown")
+                bot.send_photo(call.from_user.id, photo=call.message.photo[-1].file_id, caption=dm_text, reply_markup=dm_markup, parse_mode="Markdown")
             else:
                 bot.send_message(call.from_user.id, dm_text, reply_markup=dm_markup, parse_mode="Markdown")
         except Exception:
