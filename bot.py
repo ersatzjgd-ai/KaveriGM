@@ -1,11 +1,13 @@
 import os
+import time
+import threading
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from supabase import create_client, Client
 
 # --- CONFIG ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_GROUP_ID = os.getenv("TELEGRAM_GROUP_ID") # NEW: Needed for reassignment
+TELEGRAM_GROUP_ID = os.getenv("TELEGRAM_GROUP_ID")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
@@ -81,7 +83,7 @@ def generate_guest_text(guest, updated_by=None):
     if not lounge or lounge == 'Unassigned':
         return f"🚨 *New Arrival*\n👤 *{guest['guest_name']}*\n📍 Lounge: *Unassigned*\n\n👇 *Please claim and assign a lounge:*"
         
-    # NEW: Reassignment Text
+    # Reassignment Text
     if lounge.startswith('Pending'):
         target = lounge.replace('Pending ', '')
         return f"🚨 *Room Reassignment!*\n👤 *{guest['guest_name']}*\n👉 Transferring to: *{target}*\n\n👇 *New team member, please claim below:*"
@@ -146,6 +148,52 @@ def handle_photo_reply(message):
         except:
             pass 
 
+# ==========================================
+#      BACKGROUND REMINDER LOOP
+# ==========================================
+reminders_tracker = {}
+
+def reminder_loop():
+    while True:
+        time.sleep(60) 
+        try:
+            res = supabase.table("guests").select("*").eq("is_active", True).eq("jai_gurudev", False).execute()
+            active_guests = res.data
+            
+            current_time = time.time()
+            active_unassigned_ids = set()
+            
+            for guest in active_guests:
+                lounge = str(guest.get('lounge', ''))
+                if not lounge or lounge == 'Unassigned' or lounge.startswith('Pending'):
+                    g_id = guest['id']
+                    active_unassigned_ids.add(g_id)
+                    
+                    if g_id not in reminders_tracker:
+                        reminders_tracker[g_id] = current_time
+                    else:
+                        if current_time - reminders_tracker[g_id] >= 180:
+                            if TELEGRAM_GROUP_ID:
+                                base_text = generate_guest_text(guest)
+                                reminder_text = f"⏰ *REMINDER: WAITING 3+ MINS!*\n\n{base_text}"
+                                markup = generate_guest_keyboard(guest, page="main")
+                                
+                                try:
+                                    bot.send_message(chat_id=TELEGRAM_GROUP_ID, text=reminder_text, reply_markup=markup, parse_mode="Markdown")
+                                except Exception as e:
+                                    pass
+                                    
+                            reminders_tracker[g_id] = current_time
+                            
+            for g_id in list(reminders_tracker.keys()):
+                if g_id not in active_unassigned_ids:
+                    del reminders_tracker[g_id]
+                    
+        except Exception as e:
+            pass 
+
+threading.Thread(target=reminder_loop, daemon=True).start()
+
 # --- CALLBACK HANDLER ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
@@ -189,7 +237,7 @@ def handle_callback(call):
     # Determine Update Payload
     update_data = {}
     if action == "lng": update_data = {"lounge": value} 
-    elif action == "trn": update_data = {"lounge": f"Pending {value}"} # Sets to pending so it shows dispatch buttons
+    elif action == "trn": update_data = {"lounge": f"Pending {value}"} 
     elif action == "lmw": update_data = {"lmw_status": value}
     elif action == "dmo": update_data = {"demo_status": value}
     elif action == "rdy": update_data = {"ready_to_meet_gurudev": not guest.get('ready_to_meet_gurudev', False)}
@@ -209,18 +257,20 @@ def handle_callback(call):
         
     elif action == "trn":
         # --- REASSIGNMENT FLOW ---
-        # 1. Close out the DM for the previous owner
         dm_receipt = f"🔄 *Transfer Initiated*\n👤 *{updated_guest['guest_name']}*\n_This guest was sent back to the group for reassignment to {value}._"
         update_tg_message(call, dm_receipt, None)
         
-        # 2. Send the Reassignment message to the Main Group
         if TELEGRAM_GROUP_ID:
             new_text = generate_guest_text(updated_guest)
             new_markup = generate_guest_keyboard(updated_guest, page="main")
             try:
-                bot.send_message(chat_id=TELEGRAM_GROUP_ID, text=new_text, reply_markup=new_markup, parse_mode="Markdown")
+                # ⚡️ PHOTO BUG FIX: Carry the photo into the Main Group
+                if call.message.content_type == 'photo':
+                    bot.send_photo(chat_id=TELEGRAM_GROUP_ID, photo=call.message.photo[-1].file_id, caption=new_text, reply_markup=new_markup, parse_mode="Markdown")
+                else:
+                    bot.send_message(chat_id=TELEGRAM_GROUP_ID, text=new_text, reply_markup=new_markup, parse_mode="Markdown")
             except Exception as e:
-                print(f"Failed to send reassignment to group: {e}")
+                pass
                 
         try: bot.answer_callback_query(call.id, f"Transferred to {value}!")
         except: pass
@@ -231,7 +281,11 @@ def handle_callback(call):
         dm_markup = generate_guest_keyboard(updated_guest, page="main")
         
         try:
-            bot.send_message(call.from_user.id, dm_text, reply_markup=dm_markup, parse_mode="Markdown")
+            # ⚡️ PHOTO BUG FIX: Carry the photo into the DM
+            if call.message.content_type == 'photo':
+                bot.send_photo(call.from_user.id, photo=call.message.photo[-1].file_id, caption=dm_text, reply_markup=dm_markup, parse_mode="Markdown")
+            else:
+                bot.send_message(call.from_user.id, dm_text, reply_markup=dm_markup, parse_mode="Markdown")
         except Exception:
             bot.answer_callback_query(call.id, "⚠️ ERROR: You must message the bot directly and click /start before claiming!", show_alert=True)
             supabase.table("guests").update({"lounge": "Unassigned"}).eq("id", g_id).execute()
