@@ -2,6 +2,7 @@ import os
 import time
 import threading
 import urllib.parse
+import base64  # NEW: Needed to decode the photo for reminders!
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from supabase import create_client, Client
@@ -69,7 +70,6 @@ def generate_guest_keyboard(guest, page="main"):
             InlineKeyboardButton("🔄 Transfer Lounge", callback_data=f"pag:{g_id}:trn")
         )
         
-        # --- NEW: WhatsApp Export Link ---
         wa_msg = (
             f"*{lounge}*\n"
             f"{guest.get('guest_name', '')}\n"
@@ -103,12 +103,10 @@ def generate_guest_text(guest, updated_by=None):
     if not lounge or lounge == 'Unassigned':
         return f"🚨 *New Arrival*\n👤 *{guest['guest_name']}*\n📍 Lounge: *Unassigned*\n\n👇 *Please claim and assign a lounge:*"
         
-    # Reassignment Text
     if lounge.startswith('Pending'):
         target = lounge.replace('Pending ', '')
         return f"🚨 *Room Reassignment!*\n👤 *{guest['guest_name']}*\n👉 Transferring to: *{target}*\n\n👇 *New team member, please claim below:*"
     
-    # Clean Title Update
     text = f"*{lounge}*\n"
     text += f"👤 *{guest['guest_name']}*\n\n"
     text += f"📺 LMW: {guest.get('lmw_status', 'Not yet')}\n"
@@ -130,7 +128,6 @@ def update_tg_message(call, new_text, new_markup):
 
 # --- LIVE GROUP RECEIPT SYNKER ---
 def update_group_live_receipt(g_id, guest, user_name):
-    """Edits the main group chat message to mirror DM progress without buttons."""
     if g_id in group_msg_tracker and TELEGRAM_GROUP_ID:
         msg_info = group_msg_tracker[g_id]
         
@@ -194,7 +191,7 @@ def handle_photo_reply(message):
             pass 
 
 # ==========================================
-#      BACKGROUND REMINDER LOOP
+#      SMART BACKGROUND REMINDER LOOP
 # ==========================================
 def reminder_loop():
     while True:
@@ -213,23 +210,63 @@ def reminder_loop():
                     active_unassigned_ids.add(g_id)
                     
                     if g_id not in reminders_tracker:
-                        reminders_tracker[g_id] = current_time
+                        # Start tracking the guest
+                        reminders_tracker[g_id] = {'last_time': current_time, 'msg_id': None}
                     else:
-                        if current_time - reminders_tracker[g_id] >= 180:
+                        if current_time - reminders_tracker[g_id]['last_time'] >= 180:
+                            
+                            # 1. 🧹 DELETE THE OLD REMINDER!
+                            old_msg_id = reminders_tracker[g_id].get('msg_id')
+                            if old_msg_id and TELEGRAM_GROUP_ID:
+                                try:
+                                    bot.delete_message(TELEGRAM_GROUP_ID, old_msg_id)
+                                except Exception:
+                                    pass
+                            
+                            # 2. 📸 SEND THE NEW REMINDER (WITH PHOTO)
                             if TELEGRAM_GROUP_ID:
                                 base_text = generate_guest_text(guest)
                                 reminder_text = f"⏰ *REMINDER: WAITING 3+ MINS!*\n\n{base_text}"
                                 markup = generate_guest_keyboard(guest, page="main")
                                 
+                                new_msg_id = None
                                 try:
-                                    bot.send_message(chat_id=TELEGRAM_GROUP_ID, text=reminder_text, reply_markup=markup, parse_mode="Markdown")
+                                    if guest.get('photo_data'):
+                                        # Decode the raw photo from Supabase
+                                        img_bytes = base64.b64decode(guest['photo_data'])
+                                        sent_msg = bot.send_photo(
+                                            chat_id=TELEGRAM_GROUP_ID, 
+                                            photo=img_bytes, 
+                                            caption=reminder_text, 
+                                            reply_markup=markup, 
+                                            parse_mode="Markdown"
+                                        )
+                                        new_msg_id = sent_msg.message_id
+                                    else:
+                                        sent_msg = bot.send_message(
+                                            chat_id=TELEGRAM_GROUP_ID, 
+                                            text=reminder_text, 
+                                            reply_markup=markup, 
+                                            parse_mode="Markdown"
+                                        )
+                                        new_msg_id = sent_msg.message_id
                                 except Exception as e:
                                     pass
                                     
-                            reminders_tracker[g_id] = current_time
-                            
+                                # Reset the clock & save the new message ID so it can be deleted next time
+                                reminders_tracker[g_id]['last_time'] = current_time
+                                reminders_tracker[g_id]['msg_id'] = new_msg_id
+            
+            # 🧹 Cleanup abandoned guests
             for g_id in list(reminders_tracker.keys()):
                 if g_id not in active_unassigned_ids:
+                    # If they were claimed via Streamlit Manager, wipe the floating reminder!
+                    old_msg_id = reminders_tracker[g_id].get('msg_id')
+                    if old_msg_id and TELEGRAM_GROUP_ID:
+                        try:
+                            bot.delete_message(TELEGRAM_GROUP_ID, old_msg_id)
+                        except Exception:
+                            pass
                     del reminders_tracker[g_id]
                     
         except Exception as e:
@@ -243,7 +280,6 @@ def handle_callback(call):
     action, g_id, value = call.data.split(':')
     user_name = call.from_user.username or call.from_user.first_name
     
-    # ⚡️ SPEED FIX: Instantly kill the Telegram loading spinner
     if action != "lng" and action != "pag":
         try: bot.answer_callback_query(call.id)
         except: pass
@@ -291,12 +327,10 @@ def handle_callback(call):
     updated_res = supabase.table("guests").update(update_data).eq("id", g_id).execute()
     updated_guest = updated_res.data[0]
 
-    # Update Telegram Message In-Place
     if action == "cmp":
         final_text = f"🏁 *{updated_guest['guest_name']} - Visit Complete*\n_Finalized by @{user_name}_"
         update_tg_message(call, final_text, None)
         
-        # ⚡️ UPDATE GROUP CHAT & CLEANUP
         update_group_live_receipt(g_id, updated_guest, user_name)
         if g_id in group_msg_tracker: del group_msg_tracker[g_id]
         
@@ -304,11 +338,9 @@ def handle_callback(call):
         except: pass
         
     elif action == "trn":
-        # --- REASSIGNMENT FLOW ---
         dm_receipt = f"🔄 *Transfer Initiated*\n👤 *{updated_guest['guest_name']}*\n_This guest was sent back to the group for reassignment to {value}._"
         update_tg_message(call, dm_receipt, None)
         
-        # Delete old Live Receipt
         if g_id in group_msg_tracker and TELEGRAM_GROUP_ID:
             try: bot.delete_message(TELEGRAM_GROUP_ID, group_msg_tracker[g_id]['msg_id'])
             except: pass
@@ -319,9 +351,12 @@ def handle_callback(call):
             new_markup = generate_guest_keyboard(updated_guest, page="main")
             try:
                 if call.message.content_type == 'photo':
-                    bot.send_photo(chat_id=TELEGRAM_GROUP_ID, photo=call.message.photo[-1].file_id, caption=new_text, reply_markup=new_markup, parse_mode="Markdown")
+                    sent_msg = bot.send_photo(chat_id=TELEGRAM_GROUP_ID, photo=call.message.photo[-1].file_id, caption=new_text, reply_markup=new_markup, parse_mode="Markdown")
                 else:
-                    bot.send_message(chat_id=TELEGRAM_GROUP_ID, text=new_text, reply_markup=new_markup, parse_mode="Markdown")
+                    sent_msg = bot.send_message(chat_id=TELEGRAM_GROUP_ID, text=new_text, reply_markup=new_markup, parse_mode="Markdown")
+                
+                # ⚡️ Save this Reassignment message to the reminder tracker, so the loop can delete it when a reminder triggers!
+                reminders_tracker[g_id] = {'last_time': time.time(), 'msg_id': sent_msg.message_id}
             except Exception:
                 pass
                 
@@ -329,13 +364,24 @@ def handle_callback(call):
         except: pass
 
     elif action == "lng":
-        # --- THE DM FORK (When a lounge is claimed) ---
+        # ⚡️ CLEANUP CHECK: If they claim the guest, delete any floating reminder message!
+        if g_id in reminders_tracker:
+            reminder_msg_id = reminders_tracker[g_id].get('msg_id')
+            # Only delete the reminder if they didn't just click it (to prevent error crashes)
+            if reminder_msg_id and reminder_msg_id != call.message.message_id:
+                if TELEGRAM_GROUP_ID:
+                    try: bot.delete_message(TELEGRAM_GROUP_ID, reminder_msg_id)
+                    except: pass
+            # Nullify the tracker ID so the background loop doesn't accidentally delete the Live Receipt!
+            reminders_tracker[g_id]['msg_id'] = None
+
+        # --- THE DM FORK ---
         dm_text = generate_guest_text(updated_guest, updated_by=user_name)
         dm_markup = generate_guest_keyboard(updated_guest, page="main")
         
         try:
             if call.message.content_type == 'photo':
-                bot.send_photo(call.from_user.id, photo=call.message.photo[-1].file_id, caption=dm_text, reply_markup=dm_markup, parse_mode="Markdown")
+                bot.send_photo(call.fromuser.id, photo=call.message.photo[-1].file_id, caption=dm_text, reply_markup=dm_markup, parse_mode="Markdown")
             else:
                 bot.send_message(call.from_user.id, dm_text, reply_markup=dm_markup, parse_mode="Markdown")
         except Exception:
@@ -357,8 +403,6 @@ def handle_callback(call):
         new_text = generate_guest_text(updated_guest, updated_by=user_name)
         new_markup = generate_guest_keyboard(updated_guest, page="main") 
         update_tg_message(call, new_text, new_markup)
-        
-        # ⚡️ INSTANTLY PUSH UPDATE TO THE MAIN GROUP CHAT
         update_group_live_receipt(g_id, updated_guest, user_name)
 
 print("🤖 Bot is running and listening for button clicks...")
