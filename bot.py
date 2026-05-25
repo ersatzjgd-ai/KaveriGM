@@ -1,6 +1,7 @@
 import os
 import time
 import threading
+import urllib.parse
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from supabase import create_client, Client
@@ -18,7 +19,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 #      MEMORY TRACKERS (Reminders & Live Receipts)
 # ==========================================
 reminders_tracker = {}
-group_msg_tracker = {} # NEW: Tracks the group message ID to update it live from DMs!
+group_msg_tracker = {} # Tracks the group message ID to update it live from DMs!
 
 # --- KEYBOARD GENERATOR ---
 def generate_guest_keyboard(guest, page="main"):
@@ -67,6 +68,19 @@ def generate_guest_keyboard(guest, page="main"):
             InlineKeyboardButton("📸 Add/Update Photo", callback_data=f"pag:{g_id}:pho"),
             InlineKeyboardButton("🔄 Transfer Lounge", callback_data=f"pag:{g_id}:trn")
         )
+        
+        # --- NEW: WhatsApp Export Link ---
+        wa_msg = (
+            f"*{lounge}*\n"
+            f"{guest.get('guest_name', '')}\n"
+            f"📺 LMW: {guest.get('lmw_status', 'Not yet')}\n"
+            f"💻 IP Demo: {guest.get('demo_status', 'Not yet')}\n"
+            f"⏳ Ready for Vyas: {'✅' if guest.get('ready_to_meet_gurudev') else '❌'}\n"
+            f"🤝 Met Gurudev: {'✅' if guest.get('met_gurudev') else '❌'}"
+        )
+        wa_url = f"https://wa.me/?text={urllib.parse.quote(wa_msg)}"
+        markup.add(InlineKeyboardButton("📲 WhatsApp", url=wa_url))
+        
         markup.add(InlineKeyboardButton("🔙 Back", callback_data=f"pag:{g_id}:main"))
 
     # --- TRANSFER LOUNGE PAGE ---
@@ -114,13 +128,12 @@ def update_tg_message(call, new_text, new_markup):
     else:
         bot.edit_message_caption(caption=new_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=new_markup)
 
-# --- NEW: LIVE GROUP RECEIPT SYNKER ---
+# --- LIVE GROUP RECEIPT SYNKER ---
 def update_group_live_receipt(g_id, guest, user_name):
     """Edits the main group chat message to mirror DM progress without buttons."""
     if g_id in group_msg_tracker and TELEGRAM_GROUP_ID:
         msg_info = group_msg_tracker[g_id]
         
-        # Build the exact same card, but add the locked indicator
         if guest.get('jai_gurudev'):
             text = f"🏁 *{guest['guest_name']} - Visit Complete*\n_Finalized by @{user_name}_"
         else:
@@ -133,13 +146,12 @@ def update_group_live_receipt(g_id, guest, user_name):
             text += f"_🔒 Managed in DMs by @{user_name}_"
             
         try:
-            # Edit the correct field (text vs caption) based on original message type
             if msg_info['is_photo']:
                 bot.edit_message_caption(caption=text, chat_id=TELEGRAM_GROUP_ID, message_id=msg_info['msg_id'], parse_mode="Markdown", reply_markup=None)
             else:
                 bot.edit_message_text(text=text, chat_id=TELEGRAM_GROUP_ID, message_id=msg_info['msg_id'], parse_mode="Markdown", reply_markup=None)
         except Exception:
-            pass # Fails safely if telegram rejects an identical update
+            pass 
 
 # ==========================================
 #      PHOTO REPLY HANDLER
@@ -296,7 +308,7 @@ def handle_callback(call):
         dm_receipt = f"🔄 *Transfer Initiated*\n👤 *{updated_guest['guest_name']}*\n_This guest was sent back to the group for reassignment to {value}._"
         update_tg_message(call, dm_receipt, None)
         
-        # ⚡️ Delete the old Live Receipt from the group so we don't have duplicate tracking cards!
+        # Delete old Live Receipt
         if g_id in group_msg_tracker and TELEGRAM_GROUP_ID:
             try: bot.delete_message(TELEGRAM_GROUP_ID, group_msg_tracker[g_id]['msg_id'])
             except: pass
