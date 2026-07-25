@@ -200,6 +200,96 @@ if role == "Manager 👔":
 
         st.write("---") 
         # (PDF generation and add guests block remains exactly the same as your code here)
+        st.write("---") 
+
+        # ==========================================
+        #             ADD NEW GUEST FORM
+        # ==========================================
+        st.subheader("➕ Add New Expected Guest")
+        with st.form("add_guest_form", clear_on_submit=True):
+            col_gname, col_stype = st.columns([2, 1])
+            new_guest_name = col_gname.text_input("Guest Name*", placeholder="Enter full name")
+            new_session_type = col_stype.selectbox("Session Type", ["VIP", "General", "Group", "Special Session"])
+            
+            submit_guest = st.form_submit_button("➕ Add Guest", type="primary", use_container_width=True)
+            
+            if submit_guest:
+                if not new_guest_name.strip():
+                    st.error("Please enter a valid guest name.")
+                else:
+                    new_guest_payload = {
+                        "guest_name": new_guest_name.strip(),
+                        "session_type": new_session_type,
+                        "is_active": False,
+                        "has_left_kaveri": False,
+                        "jai_gurudev": False,
+                        "lounge": "reception"
+                    }
+                    conn.table("guests").insert(new_guest_payload).execute()
+                    st.toast(f"✅ Added {new_guest_name} to incoming guests!")
+                    st.rerun()
+
+        st.write("---")
+
+        # ==========================================
+        #          PDF REPORT GENERATION
+        # ==========================================
+        st.subheader("📄 Daily PDF Report")
+        
+        def generate_pdf_report(guests):
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", "B", 16)
+            pdf.cell(0, 10, "Kaveri Guest Management Report", ln=True, align="C")
+            
+            pdf.set_font("Arial", "", 10)
+            pdf.cell(0, 8, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align="C")
+            pdf.ln(5)
+
+            # Table Header
+            pdf.set_font("Arial", "B", 10)
+            pdf.cell(50, 8, "Guest Name", border=1)
+            pdf.cell(30, 8, "Lounge", border=1)
+            pdf.cell(30, 8, "LMW", border=1)
+            pdf.cell(30, 8, "IP Demo", border=1)
+            pdf.cell(40, 8, "Met Gurudev", border=1, ln=True)
+
+            # Table Content
+            pdf.set_font("Arial", "", 9)
+            for g in guests:
+                display_lounge = ZONES_DB_TO_UI.get(g.get("lounge"), "Unassigned")
+                pdf.cell(50, 8, str(g.get("guest_name", ""))[:25], border=1)
+                pdf.cell(30, 8, str(display_lounge), border=1)
+                pdf.cell(30, 8, str(g.get("lmw_status", "Not yet")), border=1)
+                pdf.cell(30, 8, str(g.get("demo_status", "Not yet")), border=1)
+                pdf.cell(40, 8, "Yes" if g.get("met_gurudev") else "No", border=1, ln=True)
+
+            # Save to temporary file for Streamlit download
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                pdf.output(tmp.name)
+                tmp_path = tmp.name
+
+            with open(tmp_path, "rb") as f:
+                pdf_bytes = f.read()
+
+            os.remove(tmp_path)
+            return pdf_bytes
+
+        if st.button("📥 Generate & Download PDF Report", use_container_width=True):
+            res_all = conn.table("guests").select("*").gte("created_at", today_start).order("created_at").execute()
+            all_today_guests = res_all.data
+            
+            if all_today_guests:
+                pdf_file = generate_pdf_report(all_today_guests)
+                st.download_button(
+                    label="💾 Download PDF",
+                    data=pdf_file,
+                    file_name=f"kaveri_guests_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+            else:
+                st.warning("No guest data recorded today to generate a report.")
 
 # ==========================================
 #             ON-GROUND TEAM UI
