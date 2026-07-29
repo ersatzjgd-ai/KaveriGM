@@ -29,62 +29,86 @@ COLOR_MAP = {
 st.title("🏃 On-Ground Portal")
 
 # ==========================================
-#          MODAL DIALOG FUNCTION
+#    MODAL DIALOG FUNCTION (INSTANT SAVE)
 # ==========================================
 @st.dialog("Manage Guest")
 def guest_action_modal(guest):
-    current_ui_lounge = ZONES_DB_TO_UI.get(guest.get('lounge'), "Unassigned")
     
     col_lounge, col_photo = st.columns([3, 1])
+    
+    # --- LOUNGE UPDATE ---
     with col_lounge:
+        current_ui_lounge = ZONES_DB_TO_UI.get(guest.get('lounge'), "Unassigned")
         lounge_list = UI_OPTIONS.copy()
         if current_ui_lounge not in lounge_list:
             lounge_list.insert(0, current_ui_lounge)
-        new_lounge = st.selectbox("Update Lounge:", options=lounge_list, index=lounge_list.index(current_ui_lounge), label_visibility="collapsed")
+            
+        new_lounge_ui = st.selectbox("Update Lounge:", options=lounge_list, index=lounge_list.index(current_ui_lounge), label_visibility="collapsed")
+        new_lounge_db = ZONES_UI_TO_DB.get(new_lounge_ui, "reception")
+        
+        # Auto-save to DB instantly
+        if new_lounge_db != guest.get('lounge'):
+            conn.table("guests").update({"lounge": new_lounge_db}).eq("id", guest['id']).execute()
+            guest['lounge'] = new_lounge_db 
     
+    # --- PHOTO UPDATE ---
     with col_photo:
         with st.popover("📸", use_container_width=True):
             if guest.get('photo_data'):
                 st.image(base64.b64decode(guest['photo_data']), use_container_width=True)
             else:
                 st.info("No photo.")
+                
             new_pic = st.camera_input("Update Photo", label_visibility="collapsed")
+            if new_pic:
+                pic_b64 = base64.b64encode(new_pic.getvalue()).decode()
+                if pic_b64 != guest.get('photo_data'):
+                    conn.table("guests").update({"photo_data": pic_b64}).eq("id", guest['id']).execute()
+                    guest['photo_data'] = pic_b64
+                    st.success("✅ Saved!")
 
+    # --- STATUS CONTROLS ---
     c1, c2 = st.columns(2)
     with c1:
-        new_lmw = st.segmented_control("📺 LMW", ["Not yet", "Started", "Done"], default=guest.get('lmw_status', 'Not yet') if guest.get('lmw_status') else 'Not yet')
+        current_lmw = guest.get('lmw_status') if guest.get('lmw_status') else 'Not yet'
+        new_lmw = st.segmented_control("📺 LMW", ["Not yet", "Started", "Done"], default=current_lmw)
+        if new_lmw and new_lmw != current_lmw:
+            conn.table("guests").update({"lmw_status": new_lmw}).eq("id", guest['id']).execute()
+            guest['lmw_status'] = new_lmw
+
     with c2:
-        new_demo = st.segmented_control("💻 IP Demo", ["Not yet", "Started", "Done"], default=guest.get('demo_status', 'Not yet') if guest.get('demo_status') else 'Not yet')
+        current_demo = guest.get('demo_status') if guest.get('demo_status') else 'Not yet'
+        new_demo = st.segmented_control("💻 IP Demo", ["Not yet", "Started", "Done"], default=current_demo)
+        if new_demo and new_demo != current_demo:
+            conn.table("guests").update({"demo_status": new_demo}).eq("id", guest['id']).execute()
+            guest['demo_status'] = new_demo
 
     c3, c4 = st.columns(2)
     with c3:
         new_ready = st.toggle("⏳ Ready for Vyas", value=bool(guest.get('ready_to_meet_gurudev', False)))
+        if new_ready != bool(guest.get('ready_to_meet_gurudev', False)):
+            conn.table("guests").update({"ready_to_meet_gurudev": new_ready}).eq("id", guest['id']).execute()
+            guest['ready_to_meet_gurudev'] = new_ready
+
     with c4:
         new_guru = st.toggle("🤝 Met Gurudev", value=bool(guest.get('met_gurudev', False)))
+        if new_guru != bool(guest.get('met_gurudev', False)):
+            conn.table("guests").update({"met_gurudev": new_guru}).eq("id", guest['id']).execute()
+            guest['met_gurudev'] = new_guru
 
-    msg = f"*{new_lounge}*\n{guest['guest_name']}\n📺 LMW: {new_lmw}\n💻 IP Demo: {new_demo}\n⏳ Ready for Vyas: {'✅' if new_ready else '❌'}\n🤝 Met Gurudev: {'✅' if new_guru else '❌'}"
-    wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
-    
+    # --- ACTIONS ---
     st.markdown("<br>", unsafe_allow_html=True) 
-    btn_col1, btn_col2, btn_col3 = st.columns(3)
+    btn_col1, btn_col2 = st.columns(2)
     
-    btn_col1.link_button("📲 WhatsApp", wa_url, use_container_width=True)
+    # WhatsApp Share
+    msg = f"*{new_lounge_ui}*\n{guest['guest_name']}\n📺 LMW: {guest.get('lmw_status', 'Not yet')}\n💻 IP Demo: {guest.get('demo_status', 'Not yet')}\n⏳ Ready for Vyas: {'✅' if guest.get('ready_to_meet_gurudev') else '❌'}\n🤝 Met Gurudev: {'✅' if guest.get('met_gurudev') else '❌'}"
+    wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
+    btn_col1.link_button("📲 Share via WhatsApp", wa_url, use_container_width=True)
     
-    if btn_col2.button("💾 Save", use_container_width=True):
-        update_data = {
-            "lounge": ZONES_UI_TO_DB.get(new_lounge, "reception"),
-            "lmw_status": new_lmw, "demo_status": new_demo,
-            "ready_to_meet_gurudev": new_ready, "met_gurudev": new_guru
-        }
-        if new_pic:
-            update_data["photo_data"] = base64.b64encode(new_pic.getvalue()).decode()
-            
-        conn.table("guests").update(update_data).eq("id", guest['id']).execute()
-        st.rerun()
-
-    if btn_col3.button("✅ Complete", type="primary", use_container_width=True):
+    # Complete / Archive Guest
+    if btn_col2.button("✅ Complete Visit", type="primary", use_container_width=True):
         conn.table("guests").update({"jai_gurudev": True}).eq("id", guest['id']).execute()
-        st.rerun()
+        st.rerun() # Reruns the main app to remove the guest from the list
 
 
 # ==========================================
@@ -92,13 +116,11 @@ def guest_action_modal(guest):
 # ==========================================
 @st.fragment(run_every="10s")
 def team_dashboard():
-    # Removed UTC date boundaries. Applied NULL safety checks.
     res = (
         conn.table("guests")
         .select("*")
         .eq("is_active", True)
         .or_("jai_gurudev.eq.false,jai_gurudev.is.null")
-        .order("created_at")
         .execute()
     )
     active_guests = res.data
@@ -111,8 +133,8 @@ def team_dashboard():
     search_query = st.text_input("🔍 Search Guest...", "", placeholder="Type a name to filter...")
     st.write("---")
 
-    room_order = {"reception": 0, "lounge1": 1, "lounge2": 2, "lounge3": 3, "lounge4": 4, "br": 5, "lounge5": 6, "gmr": 7}
-    active_guests.sort(key=lambda g: (room_order.get(g.get('lounge', 'reception'), 99), g['created_at']))
+    # FIX: Sort strictly by creation time (when they were expected/entered) to prevent shuffling
+    active_guests.sort(key=lambda g: g['created_at'])
 
     for guest in active_guests:
         guest_ui_lounge = ZONES_DB_TO_UI.get(guest.get('lounge'), "Unassigned")
