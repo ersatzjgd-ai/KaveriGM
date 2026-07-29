@@ -2,13 +2,11 @@ import streamlit as st
 from st_supabase_connection import SupabaseConnection
 import urllib.parse
 import base64
-from datetime import datetime
 
 # --- CONFIG ---
 st.set_page_config(page_title="Kaveri GM - Team", layout="centered", initial_sidebar_state="collapsed")
 
 conn = st.connection("supabase", type=SupabaseConnection)
-today_start = f"{datetime.now().strftime('%Y-%m-%d')}T00:00:00"
 
 ZONES_DB_TO_UI = {
     "reception": "Unassigned", "lounge1": "L1", "lounge2": "L2", "lounge3": "L3",
@@ -54,15 +52,15 @@ def guest_action_modal(guest):
 
     c1, c2 = st.columns(2)
     with c1:
-        new_lmw = st.segmented_control("📺 LMW", ["Not yet", "Started", "Done"], default=guest.get('lmw_status', 'Not yet'))
+        new_lmw = st.segmented_control("📺 LMW", ["Not yet", "Started", "Done"], default=guest.get('lmw_status', 'Not yet') if guest.get('lmw_status') else 'Not yet')
     with c2:
-        new_demo = st.segmented_control("💻 IP Demo", ["Not yet", "Started", "Done"], default=guest.get('demo_status', 'Not yet'))
+        new_demo = st.segmented_control("💻 IP Demo", ["Not yet", "Started", "Done"], default=guest.get('demo_status', 'Not yet') if guest.get('demo_status') else 'Not yet')
 
     c3, c4 = st.columns(2)
     with c3:
-        new_ready = st.toggle("⏳ Ready for Vyas", value=guest.get('ready_to_meet_gurudev', False))
+        new_ready = st.toggle("⏳ Ready for Vyas", value=bool(guest.get('ready_to_meet_gurudev', False)))
     with c4:
-        new_guru = st.toggle("🤝 Met Gurudev", value=guest.get('met_gurudev', False))
+        new_guru = st.toggle("🤝 Met Gurudev", value=bool(guest.get('met_gurudev', False)))
 
     msg = f"*{new_lounge}*\n{guest['guest_name']}\n📺 LMW: {new_lmw}\n💻 IP Demo: {new_demo}\n⏳ Ready for Vyas: {'✅' if new_ready else '❌'}\n🤝 Met Gurudev: {'✅' if new_guru else '❌'}"
     wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
@@ -94,7 +92,15 @@ def guest_action_modal(guest):
 # ==========================================
 @st.fragment(run_every="10s")
 def team_dashboard():
-    res = conn.table("guests").select("*").eq("is_active", True).eq("jai_gurudev", False).gte("created_at", today_start).order("created_at").execute()
+    # Removed UTC date boundaries. Applied NULL safety checks.
+    res = (
+        conn.table("guests")
+        .select("*")
+        .eq("is_active", True)
+        .or_("jai_gurudev.eq.false,jai_gurudev.is.null")
+        .order("created_at")
+        .execute()
+    )
     active_guests = res.data
 
     if not active_guests:
@@ -124,10 +130,9 @@ def team_dashboard():
                         unsafe_allow_html=True
                     )
                     
-                    # Tiny status indicators instead of heavy toggles
                     status = []
-                    if guest.get('lmw_status') != 'Not yet': status.append(f"📺 LMW: {guest.get('lmw_status')}")
-                    if guest.get('demo_status') != 'Not yet': status.append(f"💻 Demo: {guest.get('demo_status')}")
+                    if guest.get('lmw_status') and guest.get('lmw_status') != 'Not yet': status.append(f"📺 LMW: {guest.get('lmw_status')}")
+                    if guest.get('demo_status') and guest.get('demo_status') != 'Not yet': status.append(f"💻 Demo: {guest.get('demo_status')}")
                     if guest.get('ready_to_meet_gurudev'): status.append("⏳ Ready")
                     if status:
                         st.caption(" • ".join(status))
