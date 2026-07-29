@@ -78,7 +78,8 @@ else:
     st.write("---") 
 
     st.subheader("🟢 Arrived Guests")
-    res_active = conn.table("guests").select("*").eq("is_active", True).eq("jai_gurudev", False).gte("created_at", today_start).order("created_at").execute()
+    # Updated query to handle NULL jai_gurudev records safely
+    res_active = conn.table("guests").select("*").eq("is_active", True).or_("jai_gurudev.eq.false,jai_gurudev.is.null").gte("created_at", today_start).order("created_at").execute()
     mgr_active_guests = res_active.data
     
     if not mgr_active_guests:
