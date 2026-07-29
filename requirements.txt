@@ -4,3 +4,7 @@ supabase
 st-supabase-connection
 fpdf
 pyTelegramBotAPI
+streamlit
+supabase
+st-supabase-connection
+fpdf2
