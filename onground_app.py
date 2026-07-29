@@ -90,7 +90,7 @@ def guest_action_modal(guest):
 # ==========================================
 #          MAIN DASHBOARD (LIGHTWEIGHT)
 # ==========================================
-@st.fragment(run_every="10s")
+@st.fragment(run_every="3s")
 def team_dashboard():
     # Removed UTC date boundaries. Applied NULL safety checks.
     res = (
