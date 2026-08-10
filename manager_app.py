@@ -33,7 +33,7 @@ st.divider()
 if not st.session_state.manager_logged_in:
     pwd_input = st.text_input("Enter Admin Password", type="password")
     if st.button("Login", type="primary"):
-        if pwd_input == st.secrets.get("MANAGER_PASSWORD", "kaveri_admin"):
+        if pwd_input == os.environ.get("MANAGER_PASSWORD", "kaveri_admin"):
             st.session_state.manager_logged_in = True
             st.query_params["logged_in"] = "true"
             st.rerun() 
