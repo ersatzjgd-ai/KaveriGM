@@ -59,7 +59,8 @@ else:
     else:
         for guest in filtered_expected:
             with st.container(border=True):
-                st.markdown(f"**👤 {guest['guest_name']}** ({guest['session_type']})")
+                # Removed the session_type from the UI display here
+                st.markdown(f"**👤 {guest['guest_name']}**")
                 with st.expander("📸 Capture Photo (Optional)", expanded=False):
                     pic = st.camera_input("Take Photo", key=f"cam_{guest['id']}", label_visibility="collapsed")
                 
@@ -78,7 +79,6 @@ else:
     st.write("---") 
 
     st.subheader("🟢 Arrived Guests")
-    # Updated query to handle NULL jai_gurudev records safely
     res_active = conn.table("guests").select("*").eq("is_active", True).or_("jai_gurudev.eq.false,jai_gurudev.is.null").gte("created_at", today_start).order("created_at").execute()
     mgr_active_guests = res_active.data
     
@@ -95,19 +95,41 @@ else:
 
     st.write("---") 
 
-    st.subheader("➕ Add New Expected Guest")
+    # ==========================================
+    #     BULK ADD NEW EXPECTED GUESTS
+    # ==========================================
+    st.subheader("➕ Add Expected Guests")
     with st.form("add_guest_form", clear_on_submit=True):
-        col_gname, col_stype = st.columns([2, 1])
-        new_guest_name = col_gname.text_input("Guest Name*", placeholder="Enter full name")
-        new_session_type = col_stype.selectbox("Session Type", ["VIP", "General", "Group", "Special Session"])
-        if st.form_submit_button("➕ Add Guest", type="primary", use_container_width=True):
-            if new_guest_name.strip():
-                conn.table("guests").insert({
-                    "guest_name": new_guest_name.strip(), "session_type": new_session_type,
-                    "is_active": False, "has_left_kaveri": False, "jai_gurudev": False, "lounge": "reception"
-                }).execute()
-                st.toast(f"✅ Added {new_guest_name}!")
-                st.rerun()
+        new_guests_text = st.text_area(
+            "Guest Names*", 
+            placeholder="Enter guest names (one per line)\nExample:\nJohn Doe\nJane Smith", 
+            height=150
+        )
+        
+        if st.form_submit_button("➕ Add Guests", type="primary", use_container_width=True):
+            if new_guests_text.strip():
+                # Split by newlines and remove any empty lines/extra spaces
+                guest_names = [name.strip() for name in new_guests_text.split('\n') if name.strip()]
+                
+                if guest_names:
+                    # Construct a list of dictionaries for Supabase bulk insert
+                    new_guests_payload = [
+                        {
+                            "guest_name": name,
+                            "is_active": False,
+                            "has_left_kaveri": False,
+                            "jai_gurudev": False,
+                            "lounge": "reception"
+                        }
+                        for name in guest_names
+                    ]
+                    
+                    # One single insert request for the entire list
+                    conn.table("guests").insert(new_guests_payload).execute()
+                    st.toast(f"✅ Successfully added {len(guest_names)} expected guests!")
+                    st.rerun()
+            else:
+                st.error("Please enter at least one guest name.")
 
     st.write("---")
 
