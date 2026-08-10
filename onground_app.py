@@ -26,7 +26,7 @@ COLOR_MAP = {
     "Right Hallway B": ("#FFFFFF", "#000000")
 }
 
-st.title("🏃 On-Ground Portal")
+st.title("🏃 Lounge Team")
 
 # ==========================================
 #    MODAL DIALOG FUNCTION (INSTANT SAVE)
