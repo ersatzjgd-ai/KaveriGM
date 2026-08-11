@@ -61,27 +61,33 @@ else:
             with st.container(border=True):
                 st.markdown(f"**👤 {guest['guest_name']}**")
                 
-                # --- ADDED: Tabs for Camera and Upload ---
                 with st.expander("📸 Add Photo (Optional)", expanded=False):
+                    # Indicate if a photo is already saved in the database
+                    if guest.get('photo_data'):
+                        st.caption("✅ Photo already saved to database.")
+                        
                     tab_cam, tab_up = st.tabs(["📷 Camera", "📁 Upload"])
                     with tab_cam:
                         cam_pic = st.camera_input("Take Photo", key=f"cam_{guest['id']}", label_visibility="collapsed")
                     with tab_up:
                         uploaded_pic = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"], key=f"up_{guest['id']}", label_visibility="collapsed")
                     
-                    # Prioritize whichever image source was used
                     pic = cam_pic if cam_pic else uploaded_pic
+                    
+                    # Instantly auto-save photo to database
+                    if pic:
+                        pic_b64 = base64.b64encode(pic.getvalue()).decode()
+                        if pic_b64 != guest.get('photo_data'):
+                            conn.table("guests").update({"photo_data": pic_b64}).eq("id", guest['id']).execute()
+                            guest['photo_data'] = pic_b64  # Update local state to prevent endless calls
+                            st.success("✅ Photo saved instantly!")
                 
                 selected_ui = st.pills("Assign Lounge", UI_OPTIONS, key=f"mgr_l_{guest['id']}", label_visibility="collapsed")
                 
                 if selected_ui:
                     db_zone = ZONES_UI_TO_DB.get(selected_ui, "reception")
-                    update_data = {"is_active": True, "lounge": db_zone}
-                    
-                    if pic is not None:
-                        update_data["photo_data"] = base64.b64encode(pic.getvalue()).decode()
-                        
-                    conn.table("guests").update(update_data).eq("id", guest['id']).execute()
+                    # Photo logic was removed here since it runs independently above
+                    conn.table("guests").update({"is_active": True, "lounge": db_zone}).eq("id", guest['id']).execute()
                     st.toast(f"{guest['guest_name']} checked in ({selected_ui})!")
                     st.rerun()
 
