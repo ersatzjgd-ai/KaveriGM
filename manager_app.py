@@ -59,16 +59,25 @@ else:
     else:
         for guest in filtered_expected:
             with st.container(border=True):
-                # Removed the session_type from the UI display here
                 st.markdown(f"**👤 {guest['guest_name']}**")
-                with st.expander("📸 Capture Photo (Optional)", expanded=False):
-                    pic = st.camera_input("Take Photo", key=f"cam_{guest['id']}", label_visibility="collapsed")
+                
+                # --- ADDED: Tabs for Camera and Upload ---
+                with st.expander("📸 Add Photo (Optional)", expanded=False):
+                    tab_cam, tab_up = st.tabs(["📷 Camera", "📁 Upload"])
+                    with tab_cam:
+                        cam_pic = st.camera_input("Take Photo", key=f"cam_{guest['id']}", label_visibility="collapsed")
+                    with tab_up:
+                        uploaded_pic = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"], key=f"up_{guest['id']}", label_visibility="collapsed")
+                    
+                    # Prioritize whichever image source was used
+                    pic = cam_pic if cam_pic else uploaded_pic
                 
                 selected_ui = st.pills("Assign Lounge", UI_OPTIONS, key=f"mgr_l_{guest['id']}", label_visibility="collapsed")
                 
                 if selected_ui:
                     db_zone = ZONES_UI_TO_DB.get(selected_ui, "reception")
                     update_data = {"is_active": True, "lounge": db_zone}
+                    
                     if pic is not None:
                         update_data["photo_data"] = base64.b64encode(pic.getvalue()).decode()
                         
@@ -95,9 +104,6 @@ else:
 
     st.write("---") 
 
-    # ==========================================
-    #     BULK ADD NEW EXPECTED GUESTS
-    # ==========================================
     st.subheader("➕ Add Expected Guests")
     with st.form("add_guest_form", clear_on_submit=True):
         new_guests_text = st.text_area(
@@ -108,11 +114,9 @@ else:
         
         if st.form_submit_button("➕ Add Guests", type="primary", use_container_width=True):
             if new_guests_text.strip():
-                # Split by newlines and remove any empty lines/extra spaces
                 guest_names = [name.strip() for name in new_guests_text.split('\n') if name.strip()]
                 
                 if guest_names:
-                    # Construct a list of dictionaries for Supabase bulk insert
                     new_guests_payload = [
                         {
                             "guest_name": name,
@@ -124,7 +128,6 @@ else:
                         for name in guest_names
                     ]
                     
-                    # One single insert request for the entire list
                     conn.table("guests").insert(new_guests_payload).execute()
                     st.toast(f"✅ Successfully added {len(guest_names)} expected guests!")
                     st.rerun()
