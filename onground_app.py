@@ -26,7 +26,7 @@ COLOR_MAP = {
     "Right Hallway B": ("#FFFFFF", "#000000")
 }
 
-st.title("🏃 Lounge Team")
+st.title("🏃 On-Ground Portal")
 
 # ==========================================
 #    MODAL DIALOG FUNCTION (INSTANT SAVE)
@@ -34,7 +34,7 @@ st.title("🏃 Lounge Team")
 @st.dialog("Manage Guest")
 def guest_action_modal(guest):
     
-    col_lounge, col_photo = st.columns([3, 1])
+    col_lounge, col_photo = st.columns([3, 2]) # Widened col_photo slightly for the new button text
     
     # --- LOUNGE UPDATE ---
     with col_lounge:
@@ -46,18 +46,18 @@ def guest_action_modal(guest):
         new_lounge_ui = st.selectbox("Update Lounge:", options=lounge_list, index=lounge_list.index(current_ui_lounge), label_visibility="collapsed")
         new_lounge_db = ZONES_UI_TO_DB.get(new_lounge_ui, "reception")
         
-        # Auto-save to DB instantly
         if new_lounge_db != guest.get('lounge'):
             conn.table("guests").update({"lounge": new_lounge_db}).eq("id", guest['id']).execute()
             guest['lounge'] = new_lounge_db 
     
-    # --- PHOTO UPDATE ---
+    # --- PHOTO UPDATE & VIEW ---
     with col_photo:
-        with st.popover("📸", use_container_width=True):
+        with st.popover("📸 View Photo", use_container_width=True):
             if guest.get('photo_data'):
                 st.image(base64.b64decode(guest['photo_data']), use_container_width=True)
             else:
-                st.info("No photo.")
+                # Specific message requested when no photo is present
+                st.info("Photo not Uploaded for this guest.")
                 
             new_pic = st.camera_input("Update Photo", label_visibility="collapsed")
             if new_pic:
@@ -108,7 +108,7 @@ def guest_action_modal(guest):
     # Complete / Archive Guest
     if btn_col2.button("✅ Complete Visit", type="primary", use_container_width=True):
         conn.table("guests").update({"jai_gurudev": True}).eq("id", guest['id']).execute()
-        st.rerun() # Reruns the main app to remove the guest from the list
+        st.rerun() 
 
 
 # ==========================================
@@ -133,7 +133,7 @@ def team_dashboard():
     search_query = st.text_input("🔍 Search Guest...", "", placeholder="Type a name to filter...")
     st.write("---")
 
-    # FIX: Sort strictly by creation time (when they were expected/entered) to prevent shuffling
+    # Sort strictly by creation time (when they were expected/entered) to prevent shuffling
     active_guests.sort(key=lambda g: g['created_at'])
 
     for guest in active_guests:
