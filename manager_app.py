@@ -62,7 +62,6 @@ else:
                 st.markdown(f"**👤 {guest['guest_name']}**")
                 
                 with st.expander("📸 Add Photo (Optional)", expanded=False):
-                    # Indicate if a photo is already saved in the database
                     if guest.get('photo_data'):
                         st.caption("✅ Photo already saved to database.")
                         
@@ -74,19 +73,17 @@ else:
                     
                     pic = cam_pic if cam_pic else uploaded_pic
                     
-                    # Instantly auto-save photo to database
                     if pic:
                         pic_b64 = base64.b64encode(pic.getvalue()).decode()
                         if pic_b64 != guest.get('photo_data'):
                             conn.table("guests").update({"photo_data": pic_b64}).eq("id", guest['id']).execute()
-                            guest['photo_data'] = pic_b64  # Update local state to prevent endless calls
+                            guest['photo_data'] = pic_b64
                             st.success("✅ Photo saved instantly!")
                 
                 selected_ui = st.pills("Assign Lounge", UI_OPTIONS, key=f"mgr_l_{guest['id']}", label_visibility="collapsed")
                 
                 if selected_ui:
                     db_zone = ZONES_UI_TO_DB.get(selected_ui, "reception")
-                    # Photo logic was removed here since it runs independently above
                     conn.table("guests").update({"is_active": True, "lounge": db_zone}).eq("id", guest['id']).execute()
                     st.toast(f"{guest['guest_name']} checked in ({selected_ui})!")
                     st.rerun()
@@ -151,21 +148,54 @@ else:
         pdf.set_font("Arial", "", 10)
         pdf.cell(0, 8, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align="C")
         pdf.ln(5)
+
+        # Table Header
         pdf.set_font("Arial", "B", 10)
-        pdf.cell(50, 8, "Guest Name", border=1)
-        pdf.cell(30, 8, "Lounge", border=1)
-        pdf.cell(30, 8, "LMW", border=1)
-        pdf.cell(30, 8, "IP Demo", border=1)
-        pdf.cell(40, 8, "Met Gurudev", border=1, ln=True)
+        pdf.cell(25, 8, "Photo", border=1, align="C")
+        pdf.cell(45, 8, "Guest Name", border=1)
+        pdf.cell(25, 8, "Lounge", border=1)
+        pdf.cell(25, 8, "LMW", border=1)
+        pdf.cell(25, 8, "IP Demo", border=1)
+        pdf.cell(35, 8, "Met Gurudev", border=1, ln=True)
 
         pdf.set_font("Arial", "", 9)
         for g in guests:
+            # Check for page end to avoid breaking rows mid-photo
+            if pdf.get_y() + 22 > 270:
+                pdf.add_page()
+                pdf.set_font("Arial", "B", 10)
+                pdf.cell(25, 8, "Photo", border=1, align="C")
+                pdf.cell(45, 8, "Guest Name", border=1)
+                pdf.cell(25, 8, "Lounge", border=1)
+                pdf.cell(25, 8, "LMW", border=1)
+                pdf.cell(25, 8, "IP Demo", border=1)
+                pdf.cell(35, 8, "Met Gurudev", border=1, ln=True)
+                pdf.set_font("Arial", "", 9)
+
+            x_start = pdf.get_x()
+            y_start = pdf.get_y()
             display_lounge = ZONES_DB_TO_UI.get(g.get("lounge"), "Unassigned")
-            pdf.cell(50, 8, str(g.get("guest_name", ""))[:25], border=1)
-            pdf.cell(30, 8, str(display_lounge), border=1)
-            pdf.cell(30, 8, str(g.get("lmw_status", "Not yet")), border=1)
-            pdf.cell(30, 8, str(g.get("demo_status", "Not yet")), border=1)
-            pdf.cell(40, 8, "Yes" if g.get("met_gurudev") else "No", border=1, ln=True)
+            has_photo = bool(g.get("photo_data"))
+
+            # Render text cells with height 20mm
+            pdf.cell(25, 20, "" if has_photo else "No Photo", border=1, align="C")
+            pdf.cell(45, 20, str(g.get("guest_name", ""))[:22], border=1)
+            pdf.cell(25, 20, str(display_lounge), border=1)
+            pdf.cell(25, 20, str(g.get("lmw_status", "Not yet")), border=1)
+            pdf.cell(25, 20, str(g.get("demo_status", "Not yet")), border=1)
+            pdf.cell(35, 20, "Yes" if g.get("met_gurudev") else "No", border=1, ln=True)
+
+            # Insert photo into first cell if present
+            if has_photo:
+                try:
+                    img_bytes = base64.b64decode(g["photo_data"])
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as img_tmp:
+                        img_tmp.write(img_bytes)
+                        img_tmp_path = img_tmp.name
+                    pdf.image(img_tmp_path, x=x_start + 4.5, y=y_start + 2, w=16, h=16)
+                    os.remove(img_tmp_path)
+                except Exception:
+                    pass
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             pdf.output(tmp.name)
