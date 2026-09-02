@@ -104,7 +104,7 @@ def guest_action_modal(guest):
         st.rerun() 
 
 # ==========================================
-#    BULK GUEST MODAL (NEW)
+#    BULK GUEST MODAL 
 # ==========================================
 @st.dialog("⚡ Bulk Update Guests")
 def bulk_action_modal(active_guests):
@@ -157,7 +157,10 @@ def bulk_action_modal(active_guests):
             update_payload["jai_gurudev"] = True
             
         if update_payload:
-            conn.table("guests").update(update_payload).in_("id", selected_ids).execute()
+            # Replaced the failing .in_() method with a robust loop to guarantee database commits
+            for gid in selected_ids:
+                conn.table("guests").update(update_payload).eq("id", gid).execute()
+            
             st.rerun()
         else:
             st.warning("No status changes were selected.")
