@@ -129,36 +129,77 @@ def team_dashboard():
     selected_view = st.pills("Select Station", ["All"] + UI_OPTIONS, default="All", label_visibility="collapsed")
     search_query = st.text_input("🔍 Search Guest...", "", placeholder="Type a name to filter...", label_visibility="collapsed")
     
-    # --- BULK WHATSAPP SHARE (Dynamic based on Lounge Selection) ---
+    # --- LOUNGE ACTIONS (Bulk WhatsApp & Bulk Status) ---
     if selected_view != "All":
         lounge_guests = [g for g in active_guests if ZONES_DB_TO_UI.get(g.get('lounge'), "Unassigned") == selected_view]
         
         if lounge_guests:
-            with st.popover(f"📢 Bulk WhatsApp Share ({selected_view})", use_container_width=True):
-                
-                # Option 1: Ready for Vyas List
-                ready_guests = [g for g in lounge_guests if g.get('ready_to_meet_gurudev')]
-                if ready_guests:
-                    ready_lines = [f"*{selected_view} - Ready for Vyas*"]
-                    for g in ready_guests:
-                        ready_lines.append(f"👤 {g['guest_name']}")
-                    wa_ready = f"https://wa.me/?text={urllib.parse.quote('\n'.join(ready_lines))}"
-                    st.link_button("📲 Share 'Ready for Vyas' List", wa_ready, use_container_width=True)
-                else:
-                    st.info("No guests marked 'Ready for Vyas' in this lounge yet.")
-                
-                # Option 2: Full Lounge Status
-                full_lines = [f"*{selected_view} - Full Status Update*"]
-                for g in lounge_guests:
-                    sts = []
-                    if g.get('lmw_status') not in [None, 'Not yet']: sts.append(f"LMW: {g.get('lmw_status')}")
-                    if g.get('demo_status') not in [None, 'Not yet']: sts.append(f"Demo: {g.get('demo_status')}")
-                    if g.get('ready_to_meet_gurudev'): sts.append("⏳ Ready")
-                    st_str = ", ".join(sts) if sts else "Waiting"
-                    full_lines.append(f"👤 {g['guest_name']} ({st_str})")
-                
-                wa_full = f"https://wa.me/?text={urllib.parse.quote('\n'.join(full_lines))}"
-                st.link_button("📲 Share Full Lounge Status", wa_full, use_container_width=True)
+            col_wa, col_bulk = st.columns(2)
+            
+            # 1. BULK WHATSAPP
+            with col_wa:
+                with st.popover(f"📢 WhatsApp", use_container_width=True):
+                    ready_guests = [g for g in lounge_guests if g.get('ready_to_meet_gurudev')]
+                    if ready_guests:
+                        ready_lines = [f"*{selected_view} - Ready for Vyas*"]
+                        for g in ready_guests:
+                            ready_lines.append(f"👤 {g['guest_name']}")
+                        wa_ready = f"https://wa.me/?text={urllib.parse.quote('\n'.join(ready_lines))}"
+                        st.link_button("📲 'Ready for Vyas' List", wa_ready, use_container_width=True)
+                    else:
+                        st.info("No guests marked 'Ready'.")
+                    
+                    full_lines = [f"*{selected_view} - Full Status Update*"]
+                    for g in lounge_guests:
+                        sts = []
+                        if g.get('lmw_status') not in [None, 'Not yet']: sts.append(f"LMW: {g.get('lmw_status')}")
+                        if g.get('demo_status') not in [None, 'Not yet']: sts.append(f"Demo: {g.get('demo_status')}")
+                        if g.get('ready_to_meet_gurudev'): sts.append("⏳ Ready")
+                        st_str = ", ".join(sts) if sts else "Waiting"
+                        full_lines.append(f"👤 {g['guest_name']} ({st_str})")
+                    
+                    wa_full = f"https://wa.me/?text={urllib.parse.quote('\n'.join(full_lines))}"
+                    st.link_button("📲 Full Lounge Status", wa_full, use_container_width=True)
+
+            # 2. BULK STATUS UPDATE
+            with col_bulk:
+                with st.popover(f"⚡ Bulk Update", use_container_width=True):
+                    # Map IDs to names to perfectly handle the multiselect without ID overlap
+                    guest_ids = [g['id'] for g in lounge_guests]
+                    id_to_name = {g['id']: g['guest_name'] for g in lounge_guests}
+                    
+                    selected_ids = st.multiselect(
+                        "Select Guests to Update:", 
+                        options=guest_ids, 
+                        format_func=lambda x: id_to_name[x]
+                    )
+                    
+                    action = st.selectbox("Select Status Change:", [
+                        "📺 LMW -> Started",
+                        "📺 LMW -> Done",
+                        "💻 IP Demo -> Started",
+                        "💻 IP Demo -> Done",
+                        "⏳ Mark 'Ready for Vyas'",
+                        "🤝 Mark 'Met Gurudev'"
+                    ])
+                    
+                    if st.button("🚀 Apply Update", type="primary", use_container_width=True):
+                        if selected_ids:
+                            # Map the selected action to the correct database column and value
+                            if "LMW" in action:
+                                col_name, new_val = "lmw_status", action.split("-> ")[1].strip()
+                            elif "IP Demo" in action:
+                                col_name, new_val = "demo_status", action.split("-> ")[1].strip()
+                            elif "Vyas" in action:
+                                col_name, new_val = "ready_to_meet_gurudev", True
+                            elif "Gurudev" in action:
+                                col_name, new_val = "met_gurudev", True
+                            
+                            # Supabase in_ operator updates all matched IDs instantly
+                            conn.table("guests").update({col_name: new_val}).in_("id", selected_ids).execute()
+                            st.rerun()
+                        else:
+                            st.warning("Please select at least one guest.")
 
     st.write("---")
 
