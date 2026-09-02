@@ -26,7 +26,7 @@ COLOR_MAP = {
     "Right Hallway B": ("#FFFFFF", "#000000")
 }
 
-st.title("🏃 Lounge Team")
+st.title("🏃 On-Ground Portal")
 
 # ==========================================
 #    MODAL DIALOG FUNCTION (INSTANT SAVE)
@@ -34,7 +34,7 @@ st.title("🏃 Lounge Team")
 @st.dialog("Manage Guest")
 def guest_action_modal(guest):
     
-    col_lounge, col_photo = st.columns([3, 2]) # Widened col_photo slightly for the new button text
+    col_lounge, col_photo = st.columns([3, 2])
     
     # --- LOUNGE UPDATE ---
     with col_lounge:
@@ -43,7 +43,7 @@ def guest_action_modal(guest):
         if current_ui_lounge not in lounge_list:
             lounge_list.insert(0, current_ui_lounge)
             
-        new_lounge_ui = st.selectbox("Update Lounge:", options=lounge_list, index=lounge_list.index(current_ui_lounge), label_visibility="collapsed")
+        new_lounge_ui = st.selectbox("Update Lounge:", options=lounge_list, index=lounge_list.index(current_ui_lounge), label_visibility="collapsed", key=f"lounge_{guest['id']}")
         new_lounge_db = ZONES_UI_TO_DB.get(new_lounge_ui, "reception")
         
         if new_lounge_db != guest.get('lounge'):
@@ -56,10 +56,9 @@ def guest_action_modal(guest):
             if guest.get('photo_data'):
                 st.image(base64.b64decode(guest['photo_data']), use_container_width=True)
             else:
-                # Specific message requested when no photo is present
                 st.info("Photo not Uploaded for this guest.")
                 
-            new_pic = st.camera_input("Update Photo", label_visibility="collapsed")
+            new_pic = st.camera_input("Update Photo", label_visibility="collapsed", key=f"cam_{guest['id']}")
             if new_pic:
                 pic_b64 = base64.b64encode(new_pic.getvalue()).decode()
                 if pic_b64 != guest.get('photo_data'):
@@ -71,27 +70,27 @@ def guest_action_modal(guest):
     c1, c2 = st.columns(2)
     with c1:
         current_lmw = guest.get('lmw_status') if guest.get('lmw_status') else 'Not yet'
-        new_lmw = st.segmented_control("📺 LMW", ["Not yet", "Started", "Done"], default=current_lmw)
+        new_lmw = st.segmented_control("📺 LMW", ["Not yet", "Started", "Done"], default=current_lmw, key=f"lmw_{guest['id']}")
         if new_lmw and new_lmw != current_lmw:
             conn.table("guests").update({"lmw_status": new_lmw}).eq("id", guest['id']).execute()
             guest['lmw_status'] = new_lmw
 
     with c2:
         current_demo = guest.get('demo_status') if guest.get('demo_status') else 'Not yet'
-        new_demo = st.segmented_control("💻 IP Demo", ["Not yet", "Started", "Done"], default=current_demo)
+        new_demo = st.segmented_control("💻 IP Demo", ["Not yet", "Started", "Done"], default=current_demo, key=f"demo_{guest['id']}")
         if new_demo and new_demo != current_demo:
             conn.table("guests").update({"demo_status": new_demo}).eq("id", guest['id']).execute()
             guest['demo_status'] = new_demo
 
     c3, c4 = st.columns(2)
     with c3:
-        new_ready = st.toggle("⏳ Ready for Vyas", value=bool(guest.get('ready_to_meet_gurudev', False)))
+        new_ready = st.toggle("⏳ Ready for Vyas", value=bool(guest.get('ready_to_meet_gurudev', False)), key=f"ready_{guest['id']}")
         if new_ready != bool(guest.get('ready_to_meet_gurudev', False)):
             conn.table("guests").update({"ready_to_meet_gurudev": new_ready}).eq("id", guest['id']).execute()
             guest['ready_to_meet_gurudev'] = new_ready
 
     with c4:
-        new_guru = st.toggle("🤝 Met Gurudev", value=bool(guest.get('met_gurudev', False)))
+        new_guru = st.toggle("🤝 Met Gurudev", value=bool(guest.get('met_gurudev', False)), key=f"guru_{guest['id']}")
         if new_guru != bool(guest.get('met_gurudev', False)):
             conn.table("guests").update({"met_gurudev": new_guru}).eq("id", guest['id']).execute()
             guest['met_gurudev'] = new_guru
@@ -100,13 +99,11 @@ def guest_action_modal(guest):
     st.markdown("<br>", unsafe_allow_html=True) 
     btn_col1, btn_col2 = st.columns(2)
     
-    # WhatsApp Share
     msg = f"*{new_lounge_ui}*\n{guest['guest_name']}\n📺 LMW: {guest.get('lmw_status', 'Not yet')}\n💻 IP Demo: {guest.get('demo_status', 'Not yet')}\n⏳ Ready for Vyas: {'✅' if guest.get('ready_to_meet_gurudev') else '❌'}\n🤝 Met Gurudev: {'✅' if guest.get('met_gurudev') else '❌'}"
     wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
     btn_col1.link_button("📲 Share via WhatsApp", wa_url, use_container_width=True)
     
-    # Complete / Archive Guest
-    if btn_col2.button("✅ Complete Visit", type="primary", use_container_width=True):
+    if btn_col2.button("✅ Complete Visit", type="primary", use_container_width=True, key=f"complete_{guest['id']}"):
         conn.table("guests").update({"jai_gurudev": True}).eq("id", guest['id']).execute()
         st.rerun() 
 
@@ -130,10 +127,41 @@ def team_dashboard():
         return
         
     selected_view = st.pills("Select Station", ["All"] + UI_OPTIONS, default="All", label_visibility="collapsed")
-    search_query = st.text_input("🔍 Search Guest...", "", placeholder="Type a name to filter...")
+    search_query = st.text_input("🔍 Search Guest...", "", placeholder="Type a name to filter...", label_visibility="collapsed")
+    
+    # --- BULK WHATSAPP SHARE (Dynamic based on Lounge Selection) ---
+    if selected_view != "All":
+        lounge_guests = [g for g in active_guests if ZONES_DB_TO_UI.get(g.get('lounge'), "Unassigned") == selected_view]
+        
+        if lounge_guests:
+            with st.popover(f"📢 Bulk WhatsApp Share ({selected_view})", use_container_width=True):
+                
+                # Option 1: Ready for Vyas List
+                ready_guests = [g for g in lounge_guests if g.get('ready_to_meet_gurudev')]
+                if ready_guests:
+                    ready_lines = [f"*{selected_view} - Ready for Vyas*"]
+                    for g in ready_guests:
+                        ready_lines.append(f"👤 {g['guest_name']}")
+                    wa_ready = f"https://wa.me/?text={urllib.parse.quote('\n'.join(ready_lines))}"
+                    st.link_button("📲 Share 'Ready for Vyas' List", wa_ready, use_container_width=True)
+                else:
+                    st.info("No guests marked 'Ready for Vyas' in this lounge yet.")
+                
+                # Option 2: Full Lounge Status
+                full_lines = [f"*{selected_view} - Full Status Update*"]
+                for g in lounge_guests:
+                    sts = []
+                    if g.get('lmw_status') not in [None, 'Not yet']: sts.append(f"LMW: {g.get('lmw_status')}")
+                    if g.get('demo_status') not in [None, 'Not yet']: sts.append(f"Demo: {g.get('demo_status')}")
+                    if g.get('ready_to_meet_gurudev'): sts.append("⏳ Ready")
+                    st_str = ", ".join(sts) if sts else "Waiting"
+                    full_lines.append(f"👤 {g['guest_name']} ({st_str})")
+                
+                wa_full = f"https://wa.me/?text={urllib.parse.quote('\n'.join(full_lines))}"
+                st.link_button("📲 Share Full Lounge Status", wa_full, use_container_width=True)
+
     st.write("---")
 
-    # Sort strictly by creation time (when they were expected/entered) to prevent shuffling
     active_guests.sort(key=lambda g: g['created_at'])
 
     for guest in active_guests:
