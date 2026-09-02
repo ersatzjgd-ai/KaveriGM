@@ -29,14 +29,13 @@ COLOR_MAP = {
 st.title("🏃 On-Ground Portal")
 
 # ==========================================
-#    MODAL DIALOG FUNCTION (INSTANT SAVE)
+#    INDIVIDUAL GUEST MODAL 
 # ==========================================
 @st.dialog("Manage Guest")
 def guest_action_modal(guest):
     
     col_lounge, col_photo = st.columns([3, 2])
     
-    # --- LOUNGE UPDATE ---
     with col_lounge:
         current_ui_lounge = ZONES_DB_TO_UI.get(guest.get('lounge'), "Unassigned")
         lounge_list = UI_OPTIONS.copy()
@@ -50,7 +49,6 @@ def guest_action_modal(guest):
             conn.table("guests").update({"lounge": new_lounge_db}).eq("id", guest['id']).execute()
             guest['lounge'] = new_lounge_db 
     
-    # --- PHOTO UPDATE & VIEW ---
     with col_photo:
         with st.popover("📸 View Photo", use_container_width=True):
             if guest.get('photo_data'):
@@ -66,7 +64,6 @@ def guest_action_modal(guest):
                     guest['photo_data'] = pic_b64
                     st.success("✅ Saved!")
 
-    # --- STATUS CONTROLS ---
     c1, c2 = st.columns(2)
     with c1:
         current_lmw = guest.get('lmw_status') if guest.get('lmw_status') else 'Not yet'
@@ -95,7 +92,6 @@ def guest_action_modal(guest):
             conn.table("guests").update({"met_gurudev": new_guru}).eq("id", guest['id']).execute()
             guest['met_gurudev'] = new_guru
 
-    # --- ACTIONS ---
     st.markdown("<br>", unsafe_allow_html=True) 
     btn_col1, btn_col2 = st.columns(2)
     
@@ -107,9 +103,68 @@ def guest_action_modal(guest):
         conn.table("guests").update({"jai_gurudev": True}).eq("id", guest['id']).execute()
         st.rerun() 
 
+# ==========================================
+#    BULK GUEST MODAL (NEW)
+# ==========================================
+@st.dialog("⚡ Bulk Update Guests")
+def bulk_action_modal(active_guests):
+    guest_ids = [g['id'] for g in active_guests]
+    id_to_name = {g['id']: g['guest_name'] for g in active_guests}
+    
+    selected_ids = st.multiselect(
+        "1. Select Guests to Update:", 
+        options=guest_ids, 
+        format_func=lambda x: id_to_name[x],
+        placeholder="Choose one or more guests..."
+    )
+    
+    st.markdown("**2. Set New Statuses** *(Leave as 'No Change' to keep current state)*")
+    
+    new_lounge_ui = st.selectbox("Update Lounge:", ["No Change"] + UI_OPTIONS, key="bulk_lounge")
+        
+    c1, c2 = st.columns(2)
+    with c1:
+        new_lmw = st.segmented_control("📺 LMW", ["No Change", "Not yet", "Started", "Done"], default="No Change", key="bulk_lmw")
+    with c2:
+        new_demo = st.segmented_control("💻 IP Demo", ["No Change", "Not yet", "Started", "Done"], default="No Change", key="bulk_demo")
+        
+    c3, c4 = st.columns(2)
+    with c3:
+        new_ready = st.radio("⏳ Ready for Vyas", ["No Change", "Yes", "No"], horizontal=True, key="bulk_ready")
+    with c4:
+        new_guru = st.radio("🤝 Met Gurudev", ["No Change", "Yes", "No"], horizontal=True, key="bulk_guru")
+        
+    complete_visit = st.toggle("✅ Complete Visit for Selected (Jai Gurudev)", key="bulk_complete")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("🚀 Apply Bulk Updates", type="primary", use_container_width=True):
+        if not selected_ids:
+            st.error("Please select at least one guest from the dropdown.")
+            return
+            
+        update_payload = {}
+        if new_lounge_ui != "No Change":
+            update_payload["lounge"] = ZONES_UI_TO_DB.get(new_lounge_ui, "reception")
+        if new_lmw != "No Change" and new_lmw is not None:
+            update_payload["lmw_status"] = new_lmw
+        if new_demo != "No Change" and new_demo is not None:
+            update_payload["demo_status"] = new_demo
+        if new_ready != "No Change":
+            update_payload["ready_to_meet_gurudev"] = (new_ready == "Yes")
+        if new_guru != "No Change":
+            update_payload["met_gurudev"] = (new_guru == "Yes")
+        if complete_visit:
+            update_payload["jai_gurudev"] = True
+            
+        if update_payload:
+            conn.table("guests").update(update_payload).in_("id", selected_ids).execute()
+            st.rerun()
+        else:
+            st.warning("No status changes were selected.")
+
 
 # ==========================================
-#          MAIN DASHBOARD (LIGHTWEIGHT)
+#          MAIN DASHBOARD 
 # ==========================================
 @st.fragment(run_every="10s")
 def team_dashboard():
@@ -127,79 +182,42 @@ def team_dashboard():
         return
         
     selected_view = st.pills("Select Station", ["All"] + UI_OPTIONS, default="All", label_visibility="collapsed")
-    search_query = st.text_input("🔍 Search Guest...", "", placeholder="Type a name to filter...", label_visibility="collapsed")
     
-    # --- LOUNGE ACTIONS (Bulk WhatsApp & Bulk Status) ---
+    # --- TOP ROW: SEARCH & BULK UPDATE ---
+    col_search, col_bulk_btn = st.columns([3, 2])
+    with col_search:
+        search_query = st.text_input("🔍 Search Guest...", "", placeholder="Type a name to filter...", label_visibility="collapsed")
+    with col_bulk_btn:
+        if st.button("⚡ Bulk Update Guests", type="primary", use_container_width=True):
+            bulk_action_modal(active_guests)
+    
+    # --- LOUNGE WHATSAPP ACTIONS ---
     if selected_view != "All":
         lounge_guests = [g for g in active_guests if ZONES_DB_TO_UI.get(g.get('lounge'), "Unassigned") == selected_view]
         
         if lounge_guests:
-            col_wa, col_bulk = st.columns(2)
-            
-            # 1. BULK WHATSAPP
-            with col_wa:
-                with st.popover(f"📢 WhatsApp", use_container_width=True):
-                    ready_guests = [g for g in lounge_guests if g.get('ready_to_meet_gurudev')]
-                    if ready_guests:
-                        ready_lines = [f"*{selected_view} - Ready for Vyas*"]
-                        for g in ready_guests:
-                            ready_lines.append(f"👤 {g['guest_name']}")
-                        wa_ready = f"https://wa.me/?text={urllib.parse.quote('\n'.join(ready_lines))}"
-                        st.link_button("📲 'Ready for Vyas' List", wa_ready, use_container_width=True)
-                    else:
-                        st.info("No guests marked 'Ready'.")
-                    
-                    full_lines = [f"*{selected_view} - Full Status Update*"]
-                    for g in lounge_guests:
-                        sts = []
-                        if g.get('lmw_status') not in [None, 'Not yet']: sts.append(f"LMW: {g.get('lmw_status')}")
-                        if g.get('demo_status') not in [None, 'Not yet']: sts.append(f"Demo: {g.get('demo_status')}")
-                        if g.get('ready_to_meet_gurudev'): sts.append("⏳ Ready")
-                        st_str = ", ".join(sts) if sts else "Waiting"
-                        full_lines.append(f"👤 {g['guest_name']} ({st_str})")
-                    
-                    wa_full = f"https://wa.me/?text={urllib.parse.quote('\n'.join(full_lines))}"
-                    st.link_button("📲 Full Lounge Status", wa_full, use_container_width=True)
-
-            # 2. BULK STATUS UPDATE
-            with col_bulk:
-                with st.popover(f"⚡ Bulk Update", use_container_width=True):
-                    # Map IDs to names to perfectly handle the multiselect without ID overlap
-                    guest_ids = [g['id'] for g in lounge_guests]
-                    id_to_name = {g['id']: g['guest_name'] for g in lounge_guests}
-                    
-                    selected_ids = st.multiselect(
-                        "Select Guests to Update:", 
-                        options=guest_ids, 
-                        format_func=lambda x: id_to_name[x]
-                    )
-                    
-                    action = st.selectbox("Select Status Change:", [
-                        "📺 LMW -> Started",
-                        "📺 LMW -> Done",
-                        "💻 IP Demo -> Started",
-                        "💻 IP Demo -> Done",
-                        "⏳ Mark 'Ready for Vyas'",
-                        "🤝 Mark 'Met Gurudev'"
-                    ])
-                    
-                    if st.button("🚀 Apply Update", type="primary", use_container_width=True):
-                        if selected_ids:
-                            # Map the selected action to the correct database column and value
-                            if "LMW" in action:
-                                col_name, new_val = "lmw_status", action.split("-> ")[1].strip()
-                            elif "IP Demo" in action:
-                                col_name, new_val = "demo_status", action.split("-> ")[1].strip()
-                            elif "Vyas" in action:
-                                col_name, new_val = "ready_to_meet_gurudev", True
-                            elif "Gurudev" in action:
-                                col_name, new_val = "met_gurudev", True
-                            
-                            # Supabase in_ operator updates all matched IDs instantly
-                            conn.table("guests").update({col_name: new_val}).in_("id", selected_ids).execute()
-                            st.rerun()
-                        else:
-                            st.warning("Please select at least one guest.")
+            with st.popover(f"📢 WhatsApp Broadcast ({selected_view})", use_container_width=True):
+                ready_guests = [g for g in lounge_guests if g.get('ready_to_meet_gurudev')]
+                if ready_guests:
+                    ready_lines = [f"*{selected_view} - Ready for Vyas*"]
+                    for g in ready_guests:
+                        ready_lines.append(f"👤 {g['guest_name']}")
+                    wa_ready = f"https://wa.me/?text={urllib.parse.quote('\n'.join(ready_lines))}"
+                    st.link_button("📲 'Ready for Vyas' List", wa_ready, use_container_width=True)
+                else:
+                    st.info("No guests marked 'Ready'.")
+                
+                full_lines = [f"*{selected_view} - Full Status Update*"]
+                for g in lounge_guests:
+                    sts = []
+                    if g.get('lmw_status') not in [None, 'Not yet']: sts.append(f"LMW: {g.get('lmw_status')}")
+                    if g.get('demo_status') not in [None, 'Not yet']: sts.append(f"Demo: {g.get('demo_status')}")
+                    if g.get('ready_to_meet_gurudev'): sts.append("⏳ Ready")
+                    st_str = ", ".join(sts) if sts else "Waiting"
+                    full_lines.append(f"👤 {g['guest_name']} ({st_str})")
+                
+                wa_full = f"https://wa.me/?text={urllib.parse.quote('\n'.join(full_lines))}"
+                st.link_button("📲 Full Lounge Status", wa_full, use_container_width=True)
 
     st.write("---")
 
