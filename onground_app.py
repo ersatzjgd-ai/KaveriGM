@@ -2,11 +2,13 @@ import streamlit as st
 from st_supabase_connection import SupabaseConnection
 import urllib.parse
 import base64
+from datetime import datetime
 
 # --- CONFIG ---
 st.set_page_config(page_title="Kaveri GM - Team", layout="centered", initial_sidebar_state="collapsed")
 
 conn = st.connection("supabase", type=SupabaseConnection)
+today_start = f"{datetime.now().strftime('%Y-%m-%d')}T00:00:00"
 
 ZONES_DB_TO_UI = {
     "reception": "Unassigned", "lounge1": "L1", "lounge2": "L2", "lounge3": "L3",
@@ -32,7 +34,10 @@ st.title("🏃 On-Ground Portal")
 #    INDIVIDUAL GUEST MODAL 
 # ==========================================
 @st.dialog("Manage Guest")
-def guest_action_modal(guest):
+def guest_action_modal(base_guest):
+    # ON-DEMAND FETCH: Pull the heavy photo data only when the modal opens
+    res = conn.table("guests").select("*").eq("id", base_guest['id']).execute()
+    guest = res.data[0] if res.data else base_guest
     
     col_lounge, col_photo = st.columns([3, 2])
     
@@ -99,7 +104,6 @@ def guest_action_modal(guest):
     wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
     btn_col1.link_button("📲 Share via WhatsApp", wa_url, use_container_width=True)
     
-    # Toggle visit completion state
     is_done = bool(guest.get('jai_gurudev', False))
     btn_label = "↩️ Undo Complete Visit" if is_done else "✅ Complete Visit"
     
@@ -163,7 +167,6 @@ def bulk_action_modal(active_guests):
         if update_payload:
             for gid in selected_ids:
                 conn.table("guests").update(update_payload).eq("id", gid).execute()
-            
             st.rerun()
         else:
             st.warning("No status changes were selected.")
@@ -174,11 +177,12 @@ def bulk_action_modal(active_guests):
 # ==========================================
 @st.fragment(run_every="10s")
 def team_dashboard():
-    # Fetch all currently active guests regardless of completion status
+    # LIGHTWEIGHT FETCH: Exclude photo_data and limit to today's operations to prevent network lag
     res = (
         conn.table("guests")
-        .select("*")
+        .select("id, guest_name, is_active, has_left_kaveri, jai_gurudev, lounge, lmw_status, demo_status, ready_to_meet_gurudev, met_gurudev, created_at")
         .eq("is_active", True)
+        .gte("created_at", today_start)
         .execute()
     )
     all_active = res.data
@@ -187,10 +191,8 @@ def team_dashboard():
         st.success("No active guests currently waiting. Take a breather! ☕")
         return
         
-    # ADDED "DONE" pill at the end of the filter options
     selected_view = st.pills("Select Station", ["All"] + UI_OPTIONS + ["DONE"], default="All", label_visibility="collapsed")
     
-    # Filter lists based on completion state
     pending_guests = [g for g in all_active if not g.get('jai_gurudev')]
     completed_guests = [g for g in all_active if g.get('jai_gurudev')]
     
@@ -232,7 +234,6 @@ def team_dashboard():
 
     st.write("---")
 
-    # Determine which set of guests to display
     if selected_view == "DONE":
         display_guests = completed_guests
     else:
@@ -247,10 +248,8 @@ def team_dashboard():
     for guest in display_guests:
         guest_ui_lounge = ZONES_DB_TO_UI.get(guest.get('lounge'), "Unassigned")
         
-        # Filter logic: "All" & "DONE" show all matching search query, otherwise filter by specific lounge
         if (selected_view in ["All", "DONE"] or guest_ui_lounge == selected_view) and (search_query.lower() in guest['guest_name'].lower()):
             
-            # DONE section gets a clean grey badge
             bg_color, text_color = COLOR_MAP.get(guest_ui_lounge, ("#E0E0E0", "#000000")) if selected_view != "DONE" else ("#D1D5DB", "#1F2937")
 
             with st.container(border=True):
