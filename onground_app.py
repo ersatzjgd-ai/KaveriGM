@@ -99,8 +99,12 @@ def guest_action_modal(guest):
     wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
     btn_col1.link_button("📲 Share via WhatsApp", wa_url, use_container_width=True)
     
-    if btn_col2.button("✅ Complete Visit", type="primary", use_container_width=True, key=f"complete_{guest['id']}"):
-        conn.table("guests").update({"jai_gurudev": True}).eq("id", guest['id']).execute()
+    # Toggle visit completion state
+    is_done = bool(guest.get('jai_gurudev', False))
+    btn_label = "↩️ Undo Complete Visit" if is_done else "✅ Complete Visit"
+    
+    if btn_col2.button(btn_label, type="primary" if not is_done else "secondary", use_container_width=True, key=f"complete_{guest['id']}"):
+        conn.table("guests").update({"jai_gurudev": not is_done}).eq("id", guest['id']).execute()
         st.rerun() 
 
 # ==========================================
@@ -134,7 +138,7 @@ def bulk_action_modal(active_guests):
     with c4:
         new_guru = st.radio("🤝 Met Gurudev", ["No Change", "Yes", "No"], horizontal=True, key="bulk_guru")
         
-    complete_visit = st.toggle("✅ Complete Visit for Selected (Jai Gurudev)", key="bulk_complete")
+    complete_visit = st.toggle("✅ Complete Visit for Selected (Move to DONE)", key="bulk_complete")
 
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🚀 Apply Bulk Updates", type="primary", use_container_width=True):
@@ -157,7 +161,6 @@ def bulk_action_modal(active_guests):
             update_payload["jai_gurudev"] = True
             
         if update_payload:
-            # Replaced the failing .in_() method with a robust loop to guarantee database commits
             for gid in selected_ids:
                 conn.table("guests").update(update_payload).eq("id", gid).execute()
             
@@ -171,20 +174,25 @@ def bulk_action_modal(active_guests):
 # ==========================================
 @st.fragment(run_every="10s")
 def team_dashboard():
+    # Fetch all currently active guests regardless of completion status
     res = (
         conn.table("guests")
         .select("*")
         .eq("is_active", True)
-        .or_("jai_gurudev.eq.false,jai_gurudev.is.null")
         .execute()
     )
-    active_guests = res.data
+    all_active = res.data
 
-    if not active_guests:
+    if not all_active:
         st.success("No active guests currently waiting. Take a breather! ☕")
         return
         
-    selected_view = st.pills("Select Station", ["All"] + UI_OPTIONS, default="All", label_visibility="collapsed")
+    # ADDED "DONE" pill at the end of the filter options
+    selected_view = st.pills("Select Station", ["All"] + UI_OPTIONS + ["DONE"], default="All", label_visibility="collapsed")
+    
+    # Filter lists based on completion state
+    pending_guests = [g for g in all_active if not g.get('jai_gurudev')]
+    completed_guests = [g for g in all_active if g.get('jai_gurudev')]
     
     # --- TOP ROW: SEARCH & BULK UPDATE ---
     col_search, col_bulk_btn = st.columns([3, 2])
@@ -192,11 +200,11 @@ def team_dashboard():
         search_query = st.text_input("🔍 Search Guest...", "", placeholder="Type a name to filter...", label_visibility="collapsed")
     with col_bulk_btn:
         if st.button("⚡ Bulk Update Guests", type="primary", use_container_width=True):
-            bulk_action_modal(active_guests)
+            bulk_action_modal(pending_guests)
     
-    # --- LOUNGE WHATSAPP ACTIONS ---
-    if selected_view != "All":
-        lounge_guests = [g for g in active_guests if ZONES_DB_TO_UI.get(g.get('lounge'), "Unassigned") == selected_view]
+    # --- LOUNGE WHATSAPP ACTIONS (Only for pending lounge views) ---
+    if selected_view not in ["All", "DONE"]:
+        lounge_guests = [g for g in pending_guests if ZONES_DB_TO_UI.get(g.get('lounge'), "Unassigned") == selected_view]
         
         if lounge_guests:
             with st.popover(f"📢 WhatsApp Broadcast ({selected_view})", use_container_width=True):
@@ -224,13 +232,26 @@ def team_dashboard():
 
     st.write("---")
 
-    active_guests.sort(key=lambda g: g['created_at'])
+    # Determine which set of guests to display
+    if selected_view == "DONE":
+        display_guests = completed_guests
+    else:
+        display_guests = pending_guests
 
-    for guest in active_guests:
+    display_guests.sort(key=lambda g: g['created_at'])
+
+    if selected_view == "DONE" and not display_guests:
+        st.info("No visits completed yet today.")
+        return
+
+    for guest in display_guests:
         guest_ui_lounge = ZONES_DB_TO_UI.get(guest.get('lounge'), "Unassigned")
-        if (selected_view == "All" or guest_ui_lounge == selected_view) and (search_query.lower() in guest['guest_name'].lower()):
+        
+        # Filter logic: "All" & "DONE" show all matching search query, otherwise filter by specific lounge
+        if (selected_view in ["All", "DONE"] or guest_ui_lounge == selected_view) and (search_query.lower() in guest['guest_name'].lower()):
             
-            bg_color, text_color = COLOR_MAP.get(guest_ui_lounge, ("#E0E0E0", "#000000"))
+            # DONE section gets a clean grey badge
+            bg_color, text_color = COLOR_MAP.get(guest_ui_lounge, ("#E0E0E0", "#000000")) if selected_view != "DONE" else ("#D1D5DB", "#1F2937")
 
             with st.container(border=True):
                 col_info, col_btn = st.columns([4, 1])
@@ -238,7 +259,7 @@ def team_dashboard():
                 with col_info:
                     st.markdown(
                         f'<div style="background-color: {bg_color}; color: {text_color}; padding: 4px; border-radius: 4px; font-weight: bold; font-size: 16px;">'
-                        f'👤 {guest["guest_name"]} &nbsp;|&nbsp; 📍 {guest_ui_lounge}</div>', 
+                        f'👤 {guest["guest_name"]} &nbsp;|&nbsp; 📍 {guest_ui_lounge} {" (DONE)" if selected_view == "DONE" else ""}</div>', 
                         unsafe_allow_html=True
                     )
                     
