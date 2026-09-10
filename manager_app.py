@@ -5,12 +5,21 @@ from datetime import datetime
 import tempfile
 import os
 from fpdf import FPDF
+import httpx
 
 # --- CONFIG ---
 st.set_page_config(page_title="Kaveri GM - Manager", layout="centered", initial_sidebar_state="collapsed")
 
 conn = st.connection("supabase", type=SupabaseConnection)
 today_start = f"{datetime.now().strftime('%Y-%m-%d')}T00:00:00"
+
+# --- NETWORK FAULT TOLERANCE ---
+def safe_execute(query):
+    """Catches stale idle connections and forces a fresh reconnect on the fly."""
+    try:
+        return query.execute()
+    except (httpx.RemoteProtocolError, Exception):
+        return query.execute()
 
 # --- ZONES & TRANSLATIONS ---
 ZONES_DB_TO_UI = {
@@ -48,7 +57,7 @@ else:
         st.rerun()
         
     st.subheader("📥 Incoming Guests")
-    res = conn.table("guests").select("*").eq("is_active", False).eq("has_left_kaveri", False).gte("created_at", today_start).order("created_at").execute()
+    res = safe_execute(conn.table("guests").select("*").eq("is_active", False).eq("has_left_kaveri", False).gte("created_at", today_start).order("created_at"))
     expected_guests = res.data
 
     search_incoming = st.text_input("🔍 Search Expected Guest...", "", placeholder="Type a name to filter...")
@@ -76,7 +85,7 @@ else:
                     if pic:
                         pic_b64 = base64.b64encode(pic.getvalue()).decode()
                         if pic_b64 != guest.get('photo_data'):
-                            conn.table("guests").update({"photo_data": pic_b64}).eq("id", guest['id']).execute()
+                            safe_execute(conn.table("guests").update({"photo_data": pic_b64}).eq("id", guest['id']))
                             guest['photo_data'] = pic_b64
                             st.success("✅ Photo saved instantly!")
                 
@@ -84,14 +93,14 @@ else:
                 
                 if selected_ui:
                     db_zone = ZONES_UI_TO_DB.get(selected_ui, "reception")
-                    conn.table("guests").update({"is_active": True, "lounge": db_zone}).eq("id", guest['id']).execute()
+                    safe_execute(conn.table("guests").update({"is_active": True, "lounge": db_zone}).eq("id", guest['id']))
                     st.toast(f"{guest['guest_name']} checked in ({selected_ui})!")
                     st.rerun()
 
     st.write("---") 
 
     st.subheader("🟢 Arrived Guests")
-    res_active = conn.table("guests").select("*").eq("is_active", True).or_("jai_gurudev.eq.false,jai_gurudev.is.null").gte("created_at", today_start).order("created_at").execute()
+    res_active = safe_execute(conn.table("guests").select("*").eq("is_active", True).or_("jai_gurudev.eq.false,jai_gurudev.is.null").gte("created_at", today_start).order("created_at"))
     mgr_active_guests = res_active.data
     
     if not mgr_active_guests:
@@ -102,7 +111,7 @@ else:
             display_lounge = ZONES_DB_TO_UI.get(ag.get('lounge'), "Unassigned")
             col_name.markdown(f"**{ag['guest_name']}** | Lounge: **{display_lounge}**")
             if col_undo.button("↩️ Undo", key=f"undo_{ag['id']}"):
-                conn.table("guests").update({"is_active": False}).eq("id", ag['id']).execute()
+                safe_execute(conn.table("guests").update({"is_active": False}).eq("id", ag['id']))
                 st.rerun()
 
     st.write("---") 
@@ -131,7 +140,7 @@ else:
                         for name in guest_names
                     ]
                     
-                    conn.table("guests").insert(new_guests_payload).execute()
+                    safe_execute(conn.table("guests").insert(new_guests_payload))
                     st.toast(f"✅ Successfully added {len(guest_names)} expected guests!")
                     st.rerun()
             else:
@@ -149,7 +158,6 @@ else:
         pdf.cell(0, 8, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align="C")
         pdf.ln(5)
 
-        # Table Header
         pdf.set_font("Arial", "B", 10)
         pdf.cell(25, 8, "Photo", border=1, align="C")
         pdf.cell(45, 8, "Guest Name", border=1)
@@ -160,7 +168,6 @@ else:
 
         pdf.set_font("Arial", "", 9)
         for g in guests:
-            # Check for page end to avoid breaking rows mid-photo
             if pdf.get_y() + 22 > 270:
                 pdf.add_page()
                 pdf.set_font("Arial", "B", 10)
@@ -177,7 +184,6 @@ else:
             display_lounge = ZONES_DB_TO_UI.get(g.get("lounge"), "Unassigned")
             has_photo = bool(g.get("photo_data"))
 
-            # Render text cells with height 20mm
             pdf.cell(25, 20, "" if has_photo else "No Photo", border=1, align="C")
             pdf.cell(45, 20, str(g.get("guest_name", ""))[:22], border=1)
             pdf.cell(25, 20, str(display_lounge), border=1)
@@ -185,7 +191,6 @@ else:
             pdf.cell(25, 20, str(g.get("demo_status", "Not yet")), border=1)
             pdf.cell(35, 20, "Yes" if g.get("met_gurudev") else "No", border=1, ln=True)
 
-            # Insert photo into first cell if present
             if has_photo:
                 try:
                     img_bytes = base64.b64decode(g["photo_data"])
@@ -206,8 +211,9 @@ else:
         return pdf_bytes
 
     if st.button("📥 Generate PDF Report", use_container_width=True):
-        res_all = conn.table("guests").select("*").gte("created_at", today_start).order("created_at").execute()
+        res_all = safe_execute(conn.table("guests").select("*").gte("created_at", today_start).order("created_at"))
         if res_all.data:
             st.download_button("💾 Download PDF", data=generate_pdf_report(res_all.data), file_name=f"guests_{datetime.now().strftime('%Y%m%d')}.pdf", mime="application/pdf", use_container_width=True)
         else:
             st.warning("No guest data today.")
+            
