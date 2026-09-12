@@ -2,11 +2,22 @@ import streamlit as st
 from st_supabase_connection import SupabaseConnection
 import urllib.parse
 import base64
+from datetime import datetime
+import httpx
 
 # --- CONFIG ---
 st.set_page_config(page_title="Kaveri GM - Team", layout="centered", initial_sidebar_state="collapsed")
 
 conn = st.connection("supabase", type=SupabaseConnection)
+today_start = f"{datetime.now().strftime('%Y-%m-%d')}T00:00:00"
+
+# --- NETWORK FAULT TOLERANCE ---
+def safe_execute(query):
+    """Catches stale idle connections and forces a fresh reconnect on the fly."""
+    try:
+        return query.execute()
+    except (httpx.RemoteProtocolError, Exception):
+        return query.execute()
 
 ZONES_DB_TO_UI = {
     "reception": "Unassigned", "lounge1": "L1", "lounge2": "L2", "lounge3": "L3",
@@ -32,7 +43,12 @@ st.title("🏃 On-Ground Portal")
 #    INDIVIDUAL GUEST MODAL 
 # ==========================================
 @st.dialog("Manage Guest")
-def guest_action_modal(guest):
+def guest_action_modal(base_guest):
+    try:
+        res = safe_execute(conn.table("guests").select("*").eq("id", base_guest['id']))
+        guest = res.data[0] if res.data else base_guest
+    except Exception:
+        guest = base_guest 
     
     col_lounge, col_photo = st.columns([3, 2])
     
@@ -46,7 +62,7 @@ def guest_action_modal(guest):
         new_lounge_db = ZONES_UI_TO_DB.get(new_lounge_ui, "reception")
         
         if new_lounge_db != guest.get('lounge'):
-            conn.table("guests").update({"lounge": new_lounge_db}).eq("id", guest['id']).execute()
+            safe_execute(conn.table("guests").update({"lounge": new_lounge_db}).eq("id", guest['id']))
             guest['lounge'] = new_lounge_db 
     
     with col_photo:
@@ -60,7 +76,7 @@ def guest_action_modal(guest):
             if new_pic:
                 pic_b64 = base64.b64encode(new_pic.getvalue()).decode()
                 if pic_b64 != guest.get('photo_data'):
-                    conn.table("guests").update({"photo_data": pic_b64}).eq("id", guest['id']).execute()
+                    safe_execute(conn.table("guests").update({"photo_data": pic_b64}).eq("id", guest['id']))
                     guest['photo_data'] = pic_b64
                     st.success("✅ Saved!")
 
@@ -69,27 +85,27 @@ def guest_action_modal(guest):
         current_lmw = guest.get('lmw_status') if guest.get('lmw_status') else 'Not yet'
         new_lmw = st.segmented_control("📺 LMW", ["Not yet", "Started", "Done"], default=current_lmw, key=f"lmw_{guest['id']}")
         if new_lmw and new_lmw != current_lmw:
-            conn.table("guests").update({"lmw_status": new_lmw}).eq("id", guest['id']).execute()
+            safe_execute(conn.table("guests").update({"lmw_status": new_lmw}).eq("id", guest['id']))
             guest['lmw_status'] = new_lmw
 
     with c2:
         current_demo = guest.get('demo_status') if guest.get('demo_status') else 'Not yet'
         new_demo = st.segmented_control("💻 IP Demo", ["Not yet", "Started", "Done"], default=current_demo, key=f"demo_{guest['id']}")
         if new_demo and new_demo != current_demo:
-            conn.table("guests").update({"demo_status": new_demo}).eq("id", guest['id']).execute()
+            safe_execute(conn.table("guests").update({"demo_status": new_demo}).eq("id", guest['id']))
             guest['demo_status'] = new_demo
 
     c3, c4 = st.columns(2)
     with c3:
         new_ready = st.toggle("⏳ Ready for Vyas", value=bool(guest.get('ready_to_meet_gurudev', False)), key=f"ready_{guest['id']}")
         if new_ready != bool(guest.get('ready_to_meet_gurudev', False)):
-            conn.table("guests").update({"ready_to_meet_gurudev": new_ready}).eq("id", guest['id']).execute()
+            safe_execute(conn.table("guests").update({"ready_to_meet_gurudev": new_ready}).eq("id", guest['id']))
             guest['ready_to_meet_gurudev'] = new_ready
 
     with c4:
         new_guru = st.toggle("🤝 Met Gurudev", value=bool(guest.get('met_gurudev', False)), key=f"guru_{guest['id']}")
         if new_guru != bool(guest.get('met_gurudev', False)):
-            conn.table("guests").update({"met_gurudev": new_guru}).eq("id", guest['id']).execute()
+            safe_execute(conn.table("guests").update({"met_gurudev": new_guru}).eq("id", guest['id']))
             guest['met_gurudev'] = new_guru
 
     st.markdown("<br>", unsafe_allow_html=True) 
@@ -99,8 +115,11 @@ def guest_action_modal(guest):
     wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
     btn_col1.link_button("📲 Share via WhatsApp", wa_url, use_container_width=True)
     
-    if btn_col2.button("✅ Complete Visit", type="primary", use_container_width=True, key=f"complete_{guest['id']}"):
-        conn.table("guests").update({"jai_gurudev": True}).eq("id", guest['id']).execute()
+    is_done = bool(guest.get('jai_gurudev', False))
+    btn_label = "↩️ Undo Complete Visit" if is_done else "✅ Complete Visit"
+    
+    if btn_col2.button(btn_label, type="primary" if not is_done else "secondary", use_container_width=True, key=f"complete_{guest['id']}"):
+        safe_execute(conn.table("guests").update({"jai_gurudev": not is_done}).eq("id", guest['id']))
         st.rerun() 
 
 # ==========================================
@@ -134,7 +153,7 @@ def bulk_action_modal(active_guests):
     with c4:
         new_guru = st.radio("🤝 Met Gurudev", ["No Change", "Yes", "No"], horizontal=True, key="bulk_guru")
         
-    complete_visit = st.toggle("✅ Complete Visit for Selected (Jai Gurudev)", key="bulk_complete")
+    complete_visit = st.toggle("✅ Complete Visit for Selected (Move to DONE)", key="bulk_complete")
 
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🚀 Apply Bulk Updates", type="primary", use_container_width=True):
@@ -157,10 +176,8 @@ def bulk_action_modal(active_guests):
             update_payload["jai_gurudev"] = True
             
         if update_payload:
-            # Replaced the failing .in_() method with a robust loop to guarantee database commits
             for gid in selected_ids:
-                conn.table("guests").update(update_payload).eq("id", gid).execute()
-            
+                safe_execute(conn.table("guests").update(update_payload).eq("id", gid))
             st.rerun()
         else:
             st.warning("No status changes were selected.")
@@ -171,32 +188,35 @@ def bulk_action_modal(active_guests):
 # ==========================================
 @st.fragment(run_every="10s")
 def team_dashboard():
-    res = (
-        conn.table("guests")
-        .select("*")
-        .eq("is_active", True)
-        .or_("jai_gurudev.eq.false,jai_gurudev.is.null")
-        .execute()
-    )
-    active_guests = res.data
+    try:
+        res = safe_execute(
+            conn.table("guests")
+            .select("id, guest_name, is_active, has_left_kaveri, jai_gurudev, lounge, lmw_status, demo_status, ready_to_meet_gurudev, met_gurudev, created_at")
+            .eq("is_active", True)
+            .gte("created_at", today_start)
+        )
+        all_active = res.data
+    except Exception:
+        return # Skip this 10-second tick if internet fully drops
 
-    if not active_guests:
+    if not all_active:
         st.success("No active guests currently waiting. Take a breather! ☕")
         return
         
-    selected_view = st.pills("Select Station", ["All"] + UI_OPTIONS, default="All", label_visibility="collapsed")
+    selected_view = st.pills("Select Station", ["All"] + UI_OPTIONS + ["DONE"], default="All", label_visibility="collapsed")
     
-    # --- TOP ROW: SEARCH & BULK UPDATE ---
+    pending_guests = [g for g in all_active if not g.get('jai_gurudev')]
+    completed_guests = [g for g in all_active if g.get('jai_gurudev')]
+    
     col_search, col_bulk_btn = st.columns([3, 2])
     with col_search:
         search_query = st.text_input("🔍 Search Guest...", "", placeholder="Type a name to filter...", label_visibility="collapsed")
     with col_bulk_btn:
         if st.button("⚡ Bulk Update Guests", type="primary", use_container_width=True):
-            bulk_action_modal(active_guests)
+            bulk_action_modal(pending_guests)
     
-    # --- LOUNGE WHATSAPP ACTIONS ---
-    if selected_view != "All":
-        lounge_guests = [g for g in active_guests if ZONES_DB_TO_UI.get(g.get('lounge'), "Unassigned") == selected_view]
+    if selected_view not in ["All", "DONE"]:
+        lounge_guests = [g for g in pending_guests if ZONES_DB_TO_UI.get(g.get('lounge'), "Unassigned") == selected_view]
         
         if lounge_guests:
             with st.popover(f"📢 WhatsApp Broadcast ({selected_view})", use_container_width=True):
@@ -224,13 +244,23 @@ def team_dashboard():
 
     st.write("---")
 
-    active_guests.sort(key=lambda g: g['created_at'])
+    if selected_view == "DONE":
+        display_guests = completed_guests
+    else:
+        display_guests = pending_guests
 
-    for guest in active_guests:
+    display_guests.sort(key=lambda g: g['created_at'])
+
+    if selected_view == "DONE" and not display_guests:
+        st.info("No visits completed yet today.")
+        return
+
+    for guest in display_guests:
         guest_ui_lounge = ZONES_DB_TO_UI.get(guest.get('lounge'), "Unassigned")
-        if (selected_view == "All" or guest_ui_lounge == selected_view) and (search_query.lower() in guest['guest_name'].lower()):
+        
+        if (selected_view in ["All", "DONE"] or guest_ui_lounge == selected_view) and (search_query.lower() in guest['guest_name'].lower()):
             
-            bg_color, text_color = COLOR_MAP.get(guest_ui_lounge, ("#E0E0E0", "#000000"))
+            bg_color, text_color = COLOR_MAP.get(guest_ui_lounge, ("#E0E0E0", "#000000")) if selected_view != "DONE" else ("#D1D5DB", "#1F2937")
 
             with st.container(border=True):
                 col_info, col_btn = st.columns([4, 1])
@@ -238,7 +268,7 @@ def team_dashboard():
                 with col_info:
                     st.markdown(
                         f'<div style="background-color: {bg_color}; color: {text_color}; padding: 4px; border-radius: 4px; font-weight: bold; font-size: 16px;">'
-                        f'👤 {guest["guest_name"]} &nbsp;|&nbsp; 📍 {guest_ui_lounge}</div>', 
+                        f'👤 {guest["guest_name"]} &nbsp;|&nbsp; 📍 {guest_ui_lounge} {" (DONE)" if selected_view == "DONE" else ""}</div>', 
                         unsafe_allow_html=True
                     )
                     
